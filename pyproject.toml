@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inventree-bambu-open"
-version = "0.2.1"
-description = "Open InvenTree STEP attachments in Bambu Studio through a local Windows helper"
+version = "0.3.0"
+description = "Open and save InvenTree 3D attachments with Bambu Studio through a Windows helper"
 readme = "README.md"
 requires-python = ">=3.11"
 

@@ -8,7 +8,7 @@ from plugin import InvenTreePlugin
 from plugin.mixins import UserInterfaceMixin
 
 
-SUPPORTED_EXTENSIONS = {".step", ".stp"}
+SUPPORTED_EXTENSIONS = {".3mf", ".step", ".stp"}
 PART_LOCATION_PATTERN = re.compile(r"^/part/(?P<part_id>\d+)(?:/|$)")
 
 
@@ -27,16 +27,16 @@ def part_id_from_context(context):
 
 
 class BambuOpenPlugin(UserInterfaceMixin, InvenTreePlugin):
-    """Expose STEP attachments as primary actions on Part pages."""
+    """Expose the preferred 3D attachment as a primary action on Part pages."""
 
     NAME = "BambuOpen"
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
-    DESCRIPTION = "Open Part STEP attachments in Bambu Studio"
-    VERSION = "0.2.1"
+    DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
+    VERSION = "0.3.0"
 
     def get_ui_primary_actions(self, request, context, **kwargs):
-        """Return one download action for each STEP attachment on a Part."""
+        """Return one action for the preferred printable attachment on a Part."""
         context = context or {}
 
         part_id = part_id_from_context(context)
@@ -44,41 +44,52 @@ class BambuOpenPlugin(UserInterfaceMixin, InvenTreePlugin):
         if part_id is None:
             return []
 
-        attachments = Attachment.objects.filter(
-            model_type="part",
-            model_id=part_id,
-            attachment__isnull=False,
-        ).order_by("id")
+        attachments = list(
+            Attachment.objects.filter(
+                model_type="part",
+                model_id=part_id,
+                attachment__isnull=False,
+            ).order_by("-id")
+        )
 
-        actions = []
+        candidates = []
 
         for item in attachments:
-            if not item.attachment:
-                continue
+            if item.attachment:
+                filename = PurePosixPath(item.attachment.name).name
+                suffix = PurePosixPath(filename).suffix.lower()
+                if suffix in SUPPORTED_EXTENSIONS:
+                    candidates.append((item, filename, suffix))
 
-            filename = PurePosixPath(item.attachment.name).name
-            suffix = PurePosixPath(filename).suffix.lower()
+        if not candidates:
+            return []
 
-            if suffix not in SUPPORTED_EXTENSIONS:
-                continue
+        # Prefer the newest Bambu Studio project. Fall back to the newest STEP.
+        selected = next(
+            (candidate for candidate in candidates if candidate[2] == ".3mf"),
+            candidates[0],
+        )
+        item, filename, _ = selected
+        download_url = item.attachment.url
 
-            download_url = item.attachment.url
+        if request is not None:
+            download_url = request.build_absolute_uri(download_url)
 
-            if request is not None:
-                download_url = request.build_absolute_uri(download_url)
-
-            actions.append(
-                {
-                    "key": f"bambu-open-{item.pk}",
-                    "title": "3D Друк",
-                    "description": filename,
-                    "icon": "ti:printer:outline",
-                    "source": self.plugin_static_file(
-                        "bambu_open_v4.js:openBambuAttachment"
-                    ),
-                    "context": {"url": download_url, "filename": filename},
-                    "options": {"color": "green"},
-                }
-            )
-
-        return actions
+        return [
+            {
+                "key": f"bambu-open-{item.pk}",
+                "title": "3D Друк",
+                "description": filename,
+                "icon": "ti:printer:outline",
+                "source": self.plugin_static_file(
+                    "bambu_open_v5.js:openBambuAttachment"
+                ),
+                "context": {
+                    "url": download_url,
+                    "filename": filename,
+                    "partId": part_id,
+                    "attachmentId": item.pk,
+                },
+                "options": {"color": "green"},
+            }
+        ]

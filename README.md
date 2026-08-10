@@ -1,21 +1,23 @@
 # InvenTree Bambu Studio
 
-An InvenTree plugin and Windows helper that opens Part `.step` and `.stp`
-attachments directly in Bambu Studio without placing files in the browser's
-Downloads folder.
+An InvenTree plugin and Windows helper that opens Part `.3mf`, `.step` and
+`.stp` attachments directly in Bambu Studio, and saves the active Bambu Studio
+project back to the same Part.
 
 The plugin adds a **3D Друк** primary action to InvenTree Part pages. The action
 passes the attachment URL and its original filename to a local Windows protocol
-handler. The helper downloads the model to its private application-data folder,
-preserves the filename, and opens it through the Windows STEP file association.
+handler. A `.3mf` attachment is preferred; if none exists, the newest STEP/STP
+attachment is opened. The helper keeps the original filename and never uses the
+browser's Downloads folder.
 
 ## Requirements
 
 - InvenTree 1.4.0 (the currently tested version)
 - An InvenTree deployment with plugins enabled
 - Windows with Bambu Studio installed
-- `.step` / `.stp` associated with Bambu Studio
+- `.3mf`, `.step` and `.stp` associated with Bambu Studio
 - HTTPS on the public InvenTree URL
+- An InvenTree API token belonging to a user with Part change permission
 
 ## Server installation with Docker Compose
 
@@ -70,12 +72,27 @@ powershell.exe -ExecutionPolicy Bypass -File `
 ```
 
 Administrator rights are not required. The installer registers the
-`inventree-bambu-open://` protocol for the current Windows user. Repeat this
-step on every workstation that should use the **3D Друк** button.
+`inventree-bambu-open://` protocol and starts a tray application for the current
+Windows user. It prompts for an InvenTree API token and encrypts that token with
+Windows DPAPI, so it can only be decrypted by the same Windows user. Repeat the
+installation on every workstation that should use the **3D Друк** button.
 
 On the first click, the browser may ask permission to open the InvenTree Bambu
 Studio protocol. Approve it and optionally allow it permanently for your
 InvenTree site.
+
+## Saving a Bambu Studio project to InvenTree
+
+1. Open a model using **3D Друк** in InvenTree.
+2. If a STEP/STP model was opened, save the Bambu Studio project as `.3mf`.
+   Bambu Studio normally proposes the same model directory and basename.
+3. Right-click the InvenTree Bambu tray icon.
+4. Select **Save 3MF to InvenTree**.
+
+If the expected project file does not exist, the helper asks you to select a
+`.3mf` file. The first save creates a new attachment on the original Part;
+later saves update that same attachment. The next **3D Друк** click opens the
+`.3mf` project instead of the STEP source.
 
 ## File location and names
 
@@ -85,9 +102,10 @@ Models are stored under:
 %LOCALAPPDATA%\InvenTreeBambuOpen\Models
 ```
 
-Each attachment gets a private subdirectory, but its basename is preserved
-exactly. For example, `W-MOUNT-BALKA.step` remains `W-MOUNT-BALKA.step` when it
-is opened in Bambu Studio. Nothing is written to the Downloads folder.
+Each Part gets a private subdirectory, but attachment basenames are preserved.
+For example, `W-MOUNT-BALKA.step` is opened under that exact name and its Bambu
+Studio project is stored as `W-MOUNT-BALKA.3mf`. Nothing is written to the
+Downloads folder.
 
 The helper log is available at:
 
@@ -97,13 +115,14 @@ The helper log is available at:
 
 ## Security
 
-The helper accepts only HTTPS attachment URLs, only `.step` and `.stp` files,
-only hosts explicitly supplied during installation, and does not follow HTTP
-redirects. Run the installer again to replace the allowed-host list.
+The helper accepts only HTTPS attachment URLs, only `.3mf`, `.step` and `.stp`
+files, only hosts explicitly supplied during installation, and does not follow
+HTTP redirects. The upload token is encrypted using Windows DPAPI. Run the
+installer again to replace the allowed-host list or API token.
 
 ## Project structure
 
 - `inventree_bambu_open/` — InvenTree plugin and UI action
-- `windows-helper/` — Windows protocol handler and installer
+- `windows-helper/` — Windows protocol handler, tray application and installer
 - `Dockerfile.inventree` — plugin-enabled InvenTree image
 - `docker-compose.plugin.yml` — safe Compose overlay without deployment secrets
