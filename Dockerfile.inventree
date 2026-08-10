@@ -1,0 +1,6 @@
+ARG INVENTREE_VERSION=1.4.0
+FROM inventree/inventree:${INVENTREE_VERSION}
+
+COPY . /tmp/inventree-bambu-open
+RUN pip install --no-cache-dir /tmp/inventree-bambu-open \
+    && rm -rf /tmp/inventree-bambu-open

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inventree-bambu-open"
+version = "0.2.1"
+description = "Open InvenTree STEP attachments in Bambu Studio through a local Windows helper"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.urls]
+Homepage = "https://github.com/tcomlab/inventree-bambu-studio"
+Repository = "https://github.com/tcomlab/inventree-bambu-studio.git"
+Issues = "https://github.com/tcomlab/inventree-bambu-studio/issues"
+
+[project.entry-points."inventree_plugins"]
+BambuOpenPlugin = "inventree_bambu_open:BambuOpenPlugin"
+
+[tool.setuptools]
+packages = ["inventree_bambu_open"]
+
+[tool.setuptools.package-data]
+inventree_bambu_open = ["static/*.js"]

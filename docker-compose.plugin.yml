@@ -1,0 +1,12 @@
+services:
+  server:
+    image: inventree-local:${INVENTREE_VERSION:-1.4.0}-bambu
+    build:
+      context: ${BAMBU_PLUGIN_PATH:-./bambu-open-plugin}
+      dockerfile: Dockerfile.inventree
+
+  worker:
+    image: inventree-local:${INVENTREE_VERSION:-1.4.0}-bambu
+    build:
+      context: ${BAMBU_PLUGIN_PATH:-./bambu-open-plugin}
+      dockerfile: Dockerfile.inventree
