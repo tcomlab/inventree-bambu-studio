@@ -4,6 +4,12 @@ An InvenTree plugin and Windows helper that opens Part `.3mf`, `.step` and
 `.stp` attachments directly in Bambu Studio, and saves the active Bambu Studio
 project back to the same Part.
 
+The repository also contains the production
+[`Bambuddy ↔ InvenTree Sync`](lab8dataprocessor/README.md) sidecar. It mirrors
+filament StockItems and locations into Bambuddy, assigns loaded spools from
+InvenTree equipment locations, deducts material after printing, creates finished
+stock with calculated unit prices, and records printer working minutes.
+
 The plugin adds a **3D Друк** primary action to InvenTree Part pages. The action
 passes the attachment URL and its original filename to a local Windows protocol
 handler. A `.3mf` attachment is preferred; if none exists, the newest STEP/STP
@@ -126,3 +132,4 @@ installer again to replace the allowed-host list or API token.
 - `windows-helper/` — Windows protocol handler, tray application and installer
 - `Dockerfile.inventree` — plugin-enabled InvenTree image
 - `docker-compose.plugin.yml` — safe Compose overlay without deployment secrets
+- `lab8dataprocessor/` — Bambuddy ↔ InvenTree inventory synchronization service

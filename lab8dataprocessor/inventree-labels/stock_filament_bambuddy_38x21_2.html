@@ -1,0 +1,117 @@
+{% extends "label/label_base.html" %}
+{% load l10n i18n barcode %}
+
+{% block style %}
+@page { margin: 0; }
+
+.label {
+    position: absolute;
+    inset: 0;
+    width: 38mm;
+    height: 21.2mm;
+    overflow: hidden;
+    color: #111;
+    font-family: Arial, sans-serif;
+}
+
+.qr {
+    position: absolute;
+    left: 0.8mm;
+    top: 0.8mm;
+    width: 11.2mm;
+    height: 11.2mm;
+}
+
+.main {
+    position: absolute;
+    left: 12.7mm;
+    top: 0.8mm;
+    width: 24.5mm;
+    height: 11.2mm;
+    overflow: hidden;
+}
+
+.batch {
+    font-size: 3.6mm;
+    line-height: 1.05;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.material {
+    margin-top: 0.5mm;
+    font-size: 2.45mm;
+    line-height: 1.05;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ipn {
+    margin-top: 0.45mm;
+    font-size: 1.8mm;
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bottom {
+    position: absolute;
+    left: 0.8mm;
+    top: 12.5mm;
+    width: 36.4mm;
+    height: 7.8mm;
+    border-top: 0.25mm solid #111;
+    padding-top: 0.55mm;
+    overflow: hidden;
+}
+
+.name {
+    width: 36.4mm;
+    font-size: 2.15mm;
+    line-height: 1.05;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.meta {
+    margin-top: 0.55mm;
+    width: 36.4mm;
+    font-size: 1.55mm;
+    line-height: 1.05;
+    display: flex;
+    justify-content: space-between;
+    gap: 1mm;
+}
+
+.meta span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+{% endblock style %}
+
+{% block content %}
+<div class="label">
+    <img class="qr" alt="{% trans 'QR code' %}" src="{% qrcode qr_data %}">
+    <div class="main">
+        <div class="batch">{{ item.batch|default:"NO BATCH" }}</div>
+        <div class="material">{{ item.part.name }}</div>
+        <div class="ipn">{{ item.part.IPN|default:"—" }}</div>
+    </div>
+    <div class="bottom">
+        <div class="name">{{ item.part.description|default:item.part.full_name }}</div>
+        <div class="meta">
+            {% for parameter in item.part.parameters.all %}
+                {% if parameter.template.name == "FL-SpoolWeight" %}<span>SPOOL: {{ parameter.data }}{{ parameter.template.units }}</span>{% endif %}
+                {% if parameter.template.name == "FL-Manufacturer" %}<span>BRAND: {{ parameter.data }}</span>{% endif %}
+                {% if parameter.template.name == "Color" %}<span>COLOR: {{ parameter.data }}</span>{% endif %}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock content %}

@@ -1,0 +1,11 @@
+services:
+  bambuddy-inventree-sync:
+    build: .
+    container_name: bambuddy-inventree-sync
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./data:/data

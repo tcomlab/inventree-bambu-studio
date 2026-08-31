@@ -1,0 +1,6 @@
+services:
+  bambuddy:
+    image: bambuddy-inventree-patched:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.inventree

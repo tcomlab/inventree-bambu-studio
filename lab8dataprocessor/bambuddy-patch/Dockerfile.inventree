@@ -1,0 +1,6 @@
+FROM ghcr.io/maziggy/bambuddy:latest
+
+# Compatibility fix for A1 Mini external spool holders: firmware can leave
+# tray_type blank after accepting a slot configuration. Keep a colour-matched
+# inventory assignment instead of auto-unlinking it as a false spool swap.
+COPY bambuddy-main.py /app/backend/app/main.py

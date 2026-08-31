@@ -1,0 +1,2 @@
+class ExternalApiError(RuntimeError):
+    pass
