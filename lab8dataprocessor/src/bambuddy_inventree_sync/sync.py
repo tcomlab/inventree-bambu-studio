@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .bambuddy import BambuddyClient
 from .config import Settings
@@ -10,6 +10,9 @@ from .database import Database
 from .http_errors import ExternalApiError
 from .inventree import InvenTreeClient
 from .models import Archive, SyncResult
+
+if TYPE_CHECKING:
+    from .build_orders import BuildOrderService
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +25,13 @@ class ArchiveSyncService:
         database: Database,
         bambuddy: BambuddyClient,
         inventree: InvenTreeClient,
+        build_orders: "BuildOrderService | None" = None,
     ) -> None:
         self.settings = settings
         self.database = database
         self.bambuddy = bambuddy
         self.inventree = inventree
+        self.build_orders = build_orders
         self._lock = asyncio.Lock()
         self._printer_name_cache: dict[int, str] | None = None
 
@@ -336,6 +341,35 @@ class ArchiveSyncService:
 
         purchase_price, price_note = await self.purchase_price_for_archive(archive)
         deduction = await self._deduct_filament_for_archive(archive, force=force, existing_record=existing_record)
+
+        if self.build_orders is not None:
+            build_output = await self.build_orders.complete_archive_output(
+                archive,
+                purchase_price=purchase_price,
+                notes=self.stock_notes_for_archive(archive, price_note=price_note),
+            )
+            if build_output:
+                printer_time = await self.track_printer_time(archive)
+                self.database.upsert_record(
+                    archive_id=archive.id,
+                    sync_status="synced",
+                    part_key=str(build_output["part_key"]),
+                    part_id=int(build_output["part_id"]),
+                    stock_item_id=int(build_output["stock_item_id"]),
+                    archive_status=archive.status,
+                    raw_archive=archive.model_dump(),
+                )
+                return SyncResult(
+                    archive_id=archive.id,
+                    status="synced",
+                    message=self._sync_message(
+                        self._sync_message("Created InvenTree Build Output", deduction),
+                        printer_time,
+                    ),
+                    part_id=int(build_output["part_id"]),
+                    stock_item_id=int(build_output["stock_item_id"]),
+                    part_key=str(build_output["part_key"]),
+                )
 
         part_references = self.part_references_for_archive(archive)
         part = None

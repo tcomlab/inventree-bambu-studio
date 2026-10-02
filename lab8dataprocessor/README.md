@@ -35,9 +35,26 @@ A slot conflict is not silently overwritten: the reconciliation reports a confli
 
 The included `bambuddy-patch/` image fixes A1 Mini external-spool auto-unlinking when firmware reports a colour but leaves `tray_type` blank.
 
+### Build Order print workflow
+
+New production printing starts from an InvenTree Build Order:
+
+1. The Build Order Part must have a `.3mf` attachment.
+2. The InvenTree plugin panel sends the Build Order to the sidecar with the number of physical parts on one plate.
+3. The sidecar uploads the attachment to the Bambuddy library by content hash, creates one Bambuddy Batch and creates one queue item for every required plate run.
+4. A Pending Build Order is issued and moves to Production only after the queue has been created successfully.
+5. Queue and printer state are shown in the **Bambuddy друк** panel on the Build Order page. While a printer is active, the panel also shows live percentage, remaining time and layer count.
+6. Every completed queue run creates and completes exactly one native InvenTree Build Output. The output quantity is the configured number of parts per plate.
+7. The finished StockItem receives the calculated unit Purchase Price. Filament deduction and printer-minute accounting continue to use the measured Bambuddy Archive values.
+8. When the requested quantity is complete and no runs remain, the service can complete the Build Order automatically.
+
+One Build Order maps to one Bambuddy Batch. A durable SQLite mapping prevents duplicate batches, queue items and Build Outputs across retries and container restarts.
+
+By default the Build Order quantity must be divisible by the number of parts per plate. The panel can explicitly allow overproduction for the final plate. This avoids silently reporting fewer physical parts than were printed.
+
 ### Print completion
 
-For every successful Bambuddy archive the service:
+For every successful Bambuddy archive linked to a managed Build Order the service creates a Build Output. For legacy or manually started prints which are not linked to a managed Build Order, the compatibility path still:
 
 1. Resolves an existing InvenTree Part in `INVENTREE_PART_CATEGORY_ID` by archive name, print name, filename or filename stem.
 2. Deducts the used filament grams from the StockItem loaded in the printer/AMS location when `FILAMENT_DEDUCTION_ENABLED=true`.
@@ -63,7 +80,9 @@ If one run produces four items, the whole run cost is divided by four. The calcu
 
 SQLite state in `data/sync.sqlite3` makes all irreversible actions idempotent:
 
-- a Bambuddy archive creates at most one finished StockItem;
+- a managed Bambuddy archive creates at most one Build Output or legacy finished StockItem;
+- a Build Order creates at most one Bambuddy Batch;
+- every planned plate run creates at most one queue item;
 - batch `bambuddy-<archive_id>` is a second duplicate guard;
 - filament is deducted at most once per archive;
 - printer minutes are added at most once per archive;
@@ -132,6 +151,10 @@ FILAMENT_DEFAULT_CORE_WEIGHT=250
 FILAMENT_DEFAULT_LABEL_WEIGHT=1000
 FILAMENT_CORE_WEIGHT_CATALOG_ID=
 
+BUILD_ORDER_SYNC_ENABLED=true
+BUILD_ORDER_AUTO_COMPLETE=true
+BUILD_ORDER_RECONCILE_ON_STARTUP=true
+
 BACKFILL_PAGE_SIZE=50
 POLL_INTERVAL_SECONDS=300
 SYNC_ON_STARTUP=false
@@ -145,6 +168,9 @@ Important settings:
 - `INVENTREE_STOCK_LOCATION_ID`: destination for finished StockItems.
 - `FILAMENT_PART_CATEGORY_ID`: `PARTS/FILAMENT` category containing filament Parts.
 - `FILAMENT_EQUIPMENT_LOCATION_PATH`: root path containing B1–B4 and B1 AMS locations.
+- `BUILD_ORDER_SYNC_ENABLED`: enables Build Order to Bambuddy Batch orchestration.
+- `BUILD_ORDER_AUTO_COMPLETE`: completes a Build Order after all requested outputs are complete.
+- `BUILD_ORDER_RECONCILE_ON_STARTUP`: resumes incomplete Build Order synchronization after a container restart.
 - `POLL_INTERVAL_SECONDS`: automatic reconciliation interval; `0` disables polling.
 
 ## HTTP API
@@ -158,6 +184,9 @@ GET  /sync/status
 POST /sync/archive/{archive_id}
 POST /sync/backfill
 POST /sync/purchase-prices
+POST /sync/build-orders
+GET  /build-orders/{build_order_id}
+POST /build-orders/{build_order_id}/queue
 POST /webhooks/bambuddy
 ```
 
@@ -171,6 +200,19 @@ curl.exe -X POST -H "X-Service-Token: change-me" http://localhost:8088/sync/purc
 ```
 
 `/sync/purchase-prices` recalculates existing Bambuddy-managed finished StockItems without creating stock, deducting filament or adding printer time again.
+
+`POST /build-orders/{id}/queue` accepts:
+
+```json
+{
+  "units_per_run": 4,
+  "plate_id": 0,
+  "printer_id": 5,
+  "allow_overproduction": false
+}
+```
+
+The `.3mf` file and Build Order quantity are resolved from InvenTree; callers do not provide file paths or finished-goods quantities.
 
 ## Bambuddy compatibility patch
 
@@ -195,6 +237,7 @@ Common causes:
 
 - `401`: invalid service, Bambuddy or InvenTree token;
 - no finished stock: archive is not completed or no matching printed Part exists;
+- Build Order cannot be queued: its Part has no `.3mf` attachment, its status is not Pending/Production, or the quantity is not divisible by `units_per_run`;
 - no deduction: no matching filament StockItem is loaded in the expected equipment location;
 - missing cost: filament or printer `Purchase Price` is empty;
 - missing storage location: the InvenTree StockItem has no Stock Location;

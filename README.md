@@ -16,9 +16,15 @@ handler. A `.3mf` attachment is preferred; if none exists, the newest STEP/STP
 attachment is opened. The helper keeps the original filename and never uses the
 browser's Downloads folder.
 
+On Build Order pages the same plugin adds a **Bambuddy друк** panel. It can send
+the Part's latest `.3mf` attachment to the Bambuddy queue and shows the Batch,
+individual plate runs, printer, live progress, remaining time, completed parts
+and failures. The plugin proxies these requests through InvenTree, so the sync
+service token is never exposed to the browser.
+
 ## Requirements
 
-- InvenTree 1.4.0 (the currently tested version)
+- InvenTree 1.5.5 (the currently tested version)
 - An InvenTree deployment with plugins enabled
 - Windows with Bambu Studio installed
 - `.3mf`, `.step` and `.stp` associated with Bambu Studio
@@ -63,8 +69,23 @@ docker compose restart web
 Open **Settings → Plugins** in InvenTree and enable **Bambu Studio**. Both the
 server and worker must use the plugin-enabled image.
 
-To target another InvenTree image version, set `INVENTREE_VERSION` before the
-build. Compatibility outside 1.4.0 has not yet been verified.
+Configure these plugin settings:
+
+- `Bambuddy sync service URL`: an internal URL reachable from the InvenTree server, for example `http://192.168.1.5:8088`;
+- `Bambuddy sync service token`: the same value as `SERVICE_API_TOKEN` in the sidecar `.env`;
+- `Bambuddy browser URL`: optional user-facing Bambuddy URL.
+
+To target another InvenTree image version, set `INVENTREE_VERSION` before the build.
+
+## Printing a Build Order
+
+1. Attach the sliced `.3mf` project to the printable Part.
+2. Create a Build Order for that Part and open its **Bambuddy друк** panel.
+3. Enter how many physical parts are placed on one plate, optionally select a plate and printer, and select **Передати в Bambuddy**.
+4. Track each run in the same panel. The panel refreshes automatically every five seconds.
+5. On successful completion the sidecar creates a native Build Output and places the completed stock in the Build Order destination, or the configured finished-goods location when no destination is selected.
+
+Repeated clicks and service restarts do not duplicate the Bambuddy Batch, queue items or Build Output.
 
 ## Windows helper installation
 

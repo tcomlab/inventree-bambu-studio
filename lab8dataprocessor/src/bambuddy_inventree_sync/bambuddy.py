@@ -62,6 +62,48 @@ class BambuddyClient:
         data = await self._request("GET", "/printers/")
         return data if isinstance(data, list) else []
 
+    async def get_printer_status(self, printer_id: int) -> dict[str, Any]:
+        data = await self._request("GET", f"/printers/{printer_id}/status")
+        return data if isinstance(data, dict) else {}
+
+    async def list_library_files(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/library/files/", params={"include_root": True})
+        return data if isinstance(data, list) else []
+
+    async def upload_library_file(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            "/library/files/",
+            files={"file": (filename, content, content_type)},
+        )
+        return data if isinstance(data, dict) else {}
+
+    async def create_print_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request("POST", "/queue/batches", json=payload)
+        return data if isinstance(data, dict) else {}
+
+    async def get_print_batch(self, batch_id: int) -> dict[str, Any]:
+        data = await self._request("GET", f"/queue/batches/{batch_id}")
+        return data if isinstance(data, dict) else {}
+
+    async def list_print_batches(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/queue/batches")
+        return data if isinstance(data, list) else []
+
+    async def add_queue_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request("POST", "/queue/", json=payload)
+        return data if isinstance(data, dict) else {}
+
+    async def list_queue_items(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/queue/")
+        return data if isinstance(data, list) else []
+
     async def list_spools(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/inventory/spools")
         if isinstance(data, list):

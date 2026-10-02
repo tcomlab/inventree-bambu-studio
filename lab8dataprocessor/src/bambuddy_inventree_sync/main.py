@@ -6,11 +6,12 @@ from typing import Any
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 
 from .bambuddy import BambuddyClient
+from .build_orders import BuildOrderService
 from .config import Settings, get_settings
 from .database import Database
-from .http_errors import ExternalApiError
+from .http_errors import BuildOrderError, ExternalApiError
 from .inventree import InvenTreeClient
-from .models import BambuddyWebhook, SyncResult
+from .models import BambuddyWebhook, BuildOrderQueueRequest, SyncResult
 from .sync import ArchiveSyncService
 
 logger = logging.getLogger(__name__)
@@ -42,18 +43,27 @@ async def lifespan(app: FastAPI):
 
     bambuddy = BambuddyClient(settings)
     inventree = InvenTreeClient(settings)
-    sync_service = ArchiveSyncService(
+    build_orders = BuildOrderService(
         settings=settings,
         database=database,
         bambuddy=bambuddy,
         inventree=inventree,
     )
+    sync_service = ArchiveSyncService(
+        settings=settings,
+        database=database,
+        bambuddy=bambuddy,
+        inventree=inventree,
+        build_orders=build_orders,
+    )
+    build_orders.archive_sync = sync_service
 
     app.state.settings = settings
     app.state.database = database
     app.state.bambuddy = bambuddy
     app.state.inventree = inventree
     app.state.sync_service = sync_service
+    app.state.build_orders = build_orders
 
     stop_event = asyncio.Event()
     poll_task: asyncio.Task[Any] | None = None
@@ -64,6 +74,7 @@ async def lifespan(app: FastAPI):
                 await sync_service.backfill()
                 await sync_service.assign_missing_filament_batches()
                 await sync_service.reconcile_filament_inventory()
+                await build_orders.reconcile()
             except Exception:
                 logger.exception("Scheduled sync failed")
             try:
@@ -75,6 +86,8 @@ async def lifespan(app: FastAPI):
         async def startup_sync() -> None:
             await sync_service.backfill()
             await sync_service.reconcile_filament_inventory()
+            if settings.build_order_reconcile_on_startup:
+                await build_orders.reconcile()
         asyncio.create_task(startup_sync())
 
     # Inventory must exist before archive polling can process new filament usage.
@@ -175,3 +188,35 @@ async def sync_status(request: Request) -> dict[str, int]:
 async def sync_purchase_prices(request: Request) -> dict[str, int]:
     sync_service: ArchiveSyncService = request.app.state.sync_service
     return await sync_service.refresh_purchase_prices()
+
+
+@app.get("/build-orders/{build_order_id}", dependencies=[Depends(require_service_token)])
+async def build_order_status(request: Request, build_order_id: int) -> dict[str, Any]:
+    service: BuildOrderService = request.app.state.build_orders
+    try:
+        return await service.status(build_order_id)
+    except BuildOrderError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/build-orders/{build_order_id}/queue", dependencies=[Depends(require_service_token)])
+async def queue_build_order(
+    request: Request,
+    build_order_id: int,
+    options: BuildOrderQueueRequest,
+) -> dict[str, Any]:
+    service: BuildOrderService = request.app.state.build_orders
+    try:
+        return await service.enqueue(build_order_id, options)
+    except BuildOrderError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/sync/build-orders", dependencies=[Depends(require_service_token)])
+async def reconcile_build_orders(request: Request) -> dict[str, int]:
+    service: BuildOrderService = request.app.state.build_orders
+    return await service.reconcile()

@@ -47,3 +47,15 @@ class SyncResult(BaseModel):
     part_id: int | None = None
     stock_item_id: int | None = None
     part_key: str | None = None
+
+
+class BuildOrderQueueRequest(BaseModel):
+    """Options used when converting an InvenTree Build Order into print runs."""
+
+    units_per_run: int = Field(default=1, ge=1, le=999)
+    plate_id: int | None = Field(default=None, ge=0)
+    plate_name: str | None = None
+    printer_id: int | None = Field(default=None, ge=1)
+    target_model: str | None = None
+    manual_start: bool = False
+    allow_overproduction: bool = False

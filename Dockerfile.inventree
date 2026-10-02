@@ -1,4 +1,4 @@
-ARG INVENTREE_VERSION=1.4.0
+ARG INVENTREE_VERSION=1.5.5
 FROM inventree/inventree:${INVENTREE_VERSION}
 
 COPY . /tmp/inventree-bambu-open

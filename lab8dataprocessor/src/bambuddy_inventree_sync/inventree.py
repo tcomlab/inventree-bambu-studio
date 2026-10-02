@@ -31,6 +31,100 @@ class InvenTreeClient:
     async def get_part_category(self) -> dict[str, Any]:
         return await self._request("GET", f"/part/category/{self.settings.inventree_part_category_id}/")
 
+    async def get_part(self, part_id: int) -> dict[str, Any]:
+        data = await self._request("GET", f"/part/{part_id}/")
+        return data if isinstance(data, dict) else {}
+
+    async def get_build_order(self, build_order_id: int) -> dict[str, Any]:
+        data = await self._request("GET", f"/build/{build_order_id}/")
+        return data if isinstance(data, dict) else {}
+
+    async def issue_build_order(self, build_order_id: int) -> None:
+        await self._request("POST", f"/build/{build_order_id}/issue/")
+
+    async def finish_build_order(self, build_order_id: int) -> Any:
+        return await self._request(
+            "POST",
+            f"/build/{build_order_id}/finish/",
+            json={
+                "accept_overallocated": "accept",
+                "accept_unallocated": True,
+                "accept_incomplete": False,
+            },
+        )
+
+    async def create_build_output(
+        self,
+        *,
+        build_order_id: int,
+        quantity: int,
+        batch_code: str,
+        location_id: int,
+    ) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            f"/build/{build_order_id}/create-output/",
+            json={
+                "quantity": str(quantity),
+                "batch_code": batch_code,
+                "location": location_id,
+                "auto_allocate": False,
+            },
+        )
+        items = self._items(data) if isinstance(data, dict) else data
+        if isinstance(items, list) and items and isinstance(items[0], dict):
+            return items[0]
+        raise ExternalApiError(
+            f"InvenTree build {build_order_id} create-output returned an unexpected response: {data!r}"
+        )
+
+    async def complete_build_output(
+        self,
+        *,
+        build_order_id: int,
+        stock_item_id: int,
+        quantity: int,
+        location_id: int,
+        notes: str,
+    ) -> Any:
+        return await self._request(
+            "POST",
+            f"/build/{build_order_id}/complete/",
+            json={
+                "outputs": [{"output": stock_item_id, "quantity": str(quantity)}],
+                "location": location_id,
+                "status_custom_key": self.settings.inventree_stock_status,
+                "accept_incomplete_allocation": True,
+                "notes": notes,
+            },
+        )
+
+    async def list_part_attachments(self, part_id: int) -> list[dict[str, Any]]:
+        data = await self._request(
+            "GET",
+            "/attachment/",
+            params={
+                "model_type": "part",
+                "model_id": part_id,
+                "is_file": True,
+                "ordering": "-upload_date",
+                "limit": 100,
+            },
+        )
+        return self._items(data)
+
+    async def download_attachment(self, attachment: dict[str, Any]) -> tuple[bytes, str]:
+        url = attachment.get("attachment")
+        if not url:
+            raise ExternalApiError(f"InvenTree attachment {attachment.get('pk')} has no file URL")
+        response = await self.client.get(str(url))
+        if response.status_code >= 400:
+            body = response.text[:1000]
+            raise ExternalApiError(
+                f"InvenTree attachment download failed: HTTP {response.status_code}: {body}"
+            )
+        return response.content, response.headers.get("content-type", "application/octet-stream").split(";")[0]
+
     async def get_stock_location(self) -> dict[str, Any]:
         return await self._request("GET", f"/stock/location/{self.settings.inventree_stock_location_id}/")
 
