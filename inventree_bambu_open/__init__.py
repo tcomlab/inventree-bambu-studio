@@ -66,7 +66,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.4"
+    VERSION = "0.4.5"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {

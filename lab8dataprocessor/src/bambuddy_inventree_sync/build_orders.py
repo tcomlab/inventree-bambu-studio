@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 from .database import Database
 from .http_errors import BuildOrderError, ExternalApiError
 from .models import Archive, BuildOrderQueueRequest
+from .sliced_3mf import inspect_sliced_3mf
 
 if TYPE_CHECKING:
     from .bambuddy import BambuddyClient
@@ -33,6 +34,7 @@ class BuildOrderService:
         self.inventree = inventree
         self.archive_sync: ArchiveSyncService | None = None
         self._lock = asyncio.Lock()
+        self._sliced_file_cache: dict[int, dict[str, Any]] = {}
 
     async def enqueue(
         self,
@@ -75,15 +77,25 @@ class BuildOrderService:
             if part_id <= 0:
                 raise BuildOrderError("Build Order has no printable Part")
 
-            attachment = await self._latest_3mf_attachment(part_id)
+            attachment, sliced_file = await self._sliced_attachment(part_id)
+            if not attachment or not sliced_file.get("valid"):
+                raise BuildOrderError(
+                    str(sliced_file.get("error") or "The Build Order Part has no sliced .gcode.3mf attachment")
+                )
             library_file_id = await self._ensure_library_file(attachment)
             reference = str(build.get("reference") or f"BO-{build_order_id}").strip()
             part_name = str(build.get("part_name") or (build.get("part_detail") or {}).get("name") or part_id)
             marker = f"inventree_build_id={build_order_id}"
+            primary_plate = (sliced_file.get("plates") or [{}])[0]
             batch_payload: dict[str, Any] = {
                 "name": f"[{reference}] {part_name}"[:200],
                 "library_file_id": library_file_id,
-                "notes": f"{marker}; reference={reference}; units_per_run={options.units_per_run}",
+                "notes": (
+                    f"{marker}; reference={reference}; units_per_run={options.units_per_run}; "
+                    f"sliced_objects={primary_plate.get('object_count') or 0}; "
+                    f"sliced_weight_g={primary_plate.get('filament_weight_grams') or 0}; "
+                    f"sliced_time_s={primary_plate.get('print_time_seconds') or 0}"
+                ),
                 "plates": [
                     {
                         "plate_id": options.plate_id,
@@ -157,8 +169,9 @@ class BuildOrderService:
             },
         }
         if not record:
-            attachments = await self.inventree.list_part_attachments(int(build.get("part") or 0))
-            response["has_3mf"] = any(self._attachment_filename(item).lower().endswith(".3mf") for item in attachments)
+            _, sliced_file = await self._sliced_attachment(int(build.get("part") or 0))
+            response["sliced_file"] = sliced_file
+            response["has_3mf"] = bool(sliced_file.get("valid"))
             return response
 
         batch = await self.bambuddy.get_print_batch(int(record["bambuddy_batch_id"]))
@@ -458,12 +471,50 @@ class BuildOrderService:
                 error=queue_item.get("error_message"),
             )
 
-    async def _latest_3mf_attachment(self, part_id: int) -> dict[str, Any]:
-        attachments = await self.inventree.list_part_attachments(part_id)
+    async def _sliced_attachment(
+        self,
+        part_id: int,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        attachments = sorted(
+            await self.inventree.list_part_attachments(part_id),
+            key=lambda item: int(item.get("pk") or item.get("id") or 0),
+            reverse=True,
+        )
+        fallback_3mf: dict[str, Any] | None = None
         for attachment in attachments:
-            if self._attachment_filename(attachment).lower().endswith(".3mf"):
-                return attachment
-        raise BuildOrderError("The Build Order Part has no .3mf attachment")
+            filename = self._attachment_filename(attachment)
+            lower_name = filename.lower()
+            if lower_name.endswith(".3mf") and fallback_3mf is None:
+                fallback_3mf = attachment
+            if not lower_name.endswith(".gcode.3mf"):
+                continue
+            attachment_id = int(attachment.get("pk") or attachment.get("id"))
+            cached = self._sliced_file_cache.get(attachment_id)
+            if cached is not None:
+                return attachment, cached
+            content, _ = await self.inventree.download_attachment(attachment)
+            analysis = inspect_sliced_3mf(filename, content)
+            analysis["attachment_id"] = attachment_id
+            self._sliced_file_cache[attachment_id] = analysis
+            return attachment, analysis
+
+        if fallback_3mf is not None:
+            filename = self._attachment_filename(fallback_3mf)
+            return None, {
+                "filename": filename,
+                "valid": False,
+                "plates": [],
+                "error": (
+                    f"{filename} не є нарізаним файлом. У Bambu Studio виберіть "
+                    "Export plate sliced file і завантажте .gcode.3mf"
+                ),
+            }
+        return None, {
+            "filename": None,
+            "valid": False,
+            "plates": [],
+            "error": "У Part немає вкладення .gcode.3mf",
+        }
 
     async def _ensure_library_file(self, attachment: dict[str, Any]) -> int:
         attachment_id = int(attachment.get("pk") or attachment.get("id"))

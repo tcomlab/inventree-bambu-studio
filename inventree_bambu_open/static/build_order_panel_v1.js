@@ -35,6 +35,43 @@ function formatMinutes(value) {
   return `${hours} год ${Math.round(minutes % 60)} хв`;
 }
 
+function formatSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return '—';
+  return formatMinutes(seconds / 60);
+}
+
+function renderSlicedFile(sliced) {
+  if (!sliced?.valid) {
+    return `<div class="bb-slice bb-slice-invalid"><strong>Файл для друку не готовий</strong><div>${escapeHtml(sliced?.error || 'У Part немає вкладення .gcode.3mf')}</div></div>`;
+  }
+
+  const plates = sliced.plates || [];
+  const plate = plates[0] || {};
+  const filaments = (plate.filaments || []).map((item) => {
+    const usage = item.used_g == null ? '' : ` · ${Number(item.used_g).toFixed(1)} г`;
+    const color = item.color ? ` · ${item.color}` : '';
+    return `${item.type || 'Матеріал'}${color}${usage}`;
+  });
+  const warnings = (plate.warnings || []).map((item) => item.message).filter(Boolean);
+  const printer = [plate.printer_model_id, plate.nozzle_diameters ? `сопло ${plate.nozzle_diameters} мм` : '']
+    .filter(Boolean).join(' · ') || '—';
+
+  return `
+    <div class="bb-slice">
+      <div class="bb-slice-head"><strong>${escapeHtml(sliced.filename)}</strong><span>Нарізаний .gcode.3mf</span></div>
+      <div class="bb-slice-grid">
+        <div><span>Деталей на пластині</span><b>${escapeHtml(plate.object_count ?? '—')}</b></div>
+        <div><span>Час друку</span><b>${escapeHtml(formatSeconds(plate.print_time_seconds))}</b></div>
+        <div><span>Філамент</span><b>${plate.filament_weight_grams == null ? '—' : `${escapeHtml(Number(plate.filament_weight_grams).toFixed(1))} г`}</b></div>
+        <div><span>Принтер</span><b>${escapeHtml(printer)}</b></div>
+      </div>
+      <div class="bb-slice-line"><span>Матеріали:</span> ${escapeHtml(filaments.join('; ') || '—')}</div>
+      ${plates.length > 1 ? `<div class="bb-muted">У файлі ${escapeHtml(plates.length)} пластин. Для цього запуску використовуються дані першої.</div>` : ''}
+      ${warnings.length ? `<div class="bb-warning">${escapeHtml(warnings.join('; '))}</div>` : ''}
+    </div>`;
+}
+
 function renderQueueRows(items) {
   if (!items?.length) {
     return '<div class="bb-empty">Черга ще не створена.</div>';
@@ -90,7 +127,8 @@ export function renderBuildOrderPanel(target, data) {
       .bb-card{border:1px solid var(--mantine-color-default-border,#dee2e6);border-radius:7px;padding:.6rem}.bb-card b{font-size:1.15rem;display:block}.bb-muted,.bb-details,.bb-empty{opacity:.72;font-size:.85rem}
       .bb-form{display:flex;gap:.6rem;align-items:end;flex-wrap:wrap;border-top:1px solid var(--mantine-color-default-border,#dee2e6);padding-top:.8rem;margin-top:.8rem}.bb-field{display:flex;flex-direction:column;gap:.25rem}.bb-field input,.bb-field select{min-height:34px;padding:.3rem .45rem;border:1px solid #868e96;border-radius:5px;background:transparent;color:inherit}.bb-field select option{color:#111}
       .bb-button{min-height:34px;padding:.35rem .8rem;border:0;border-radius:5px;background:#00ae42;color:white;font-weight:600;cursor:pointer}.bb-button:disabled{opacity:.5;cursor:not-allowed}.bb-error{color:#fa5252;margin:.5rem 0}.bb-runs{display:grid;gap:.45rem;margin-top:.8rem}.bb-run{border:1px solid var(--mantine-color-default-border,#dee2e6);border-radius:6px;padding:.5rem}.bb-run-main{display:grid;grid-template-columns:110px 70px minmax(100px,1fr) 110px;gap:.5rem;align-items:center}.bb-status{font-weight:600}.bb-printing{color:#228be6}.bb-completed{color:#00ae42}.bb-failed{color:#fa5252}.bb-mini{height:5px;background:#495057;border-radius:5px;overflow:hidden;margin-top:.4rem}
-      @media(max-width:800px){.bb-grid{grid-template-columns:repeat(2,1fr)}.bb-run-main{grid-template-columns:1fr 1fr}}
+      .bb-slice{border:1px solid var(--mantine-color-default-border,#dee2e6);border-radius:7px;padding:.7rem;margin:.75rem 0}.bb-slice-invalid{border-color:#fa5252}.bb-slice-invalid div{color:#fa5252;margin-top:.25rem}.bb-slice-head{display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap}.bb-slice-head span,.bb-slice-grid span,.bb-slice-line span{opacity:.7;font-size:.8rem}.bb-slice-grid{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:.65rem;margin-top:.65rem}.bb-slice-grid b{display:block;margin-top:.15rem}.bb-slice-line{margin-top:.6rem}.bb-warning{color:#fab005;margin-top:.45rem}
+      @media(max-width:800px){.bb-grid,.bb-slice-grid{grid-template-columns:repeat(2,1fr)}.bb-run-main{grid-template-columns:1fr 1fr}}
     </style>
     <div class="bb-wrap"><div class="bb-muted">Завантаження стану Bambuddy…</div></div>`;
 
@@ -117,6 +155,9 @@ export function renderBuildOrderPanel(target, data) {
     const build = state.build || {};
     const batch = state.batch || {};
     const configured = Boolean(state.configured);
+    const sliced = state.sliced_file || {};
+    const primaryPlate = (sliced.plates || [])[0] || {};
+    const recommendedUnits = Math.max(1, Number(sliced.recommended_units_per_run || primaryPlate.object_count || 1));
     const canQueue = Boolean(context.canQueue) && !configured && [10, 20].includes(Number(build.status));
     const openLink = context.bambuddyUrl
       ? `<a href="${escapeHtml(context.bambuddyUrl)}" target="_blank" rel="noopener">Відкрити Bambuddy</a>`
@@ -139,14 +180,15 @@ export function renderBuildOrderPanel(target, data) {
         </div>
         <div class="bb-runs">${renderQueueRows(state.queue_items)}</div>
       ` : `
-        <div class="bb-empty">${state.has_3mf ? 'Build Order готовий до передачі в чергу.' : 'У Part немає вкладення .3mf.'}</div>
+        ${renderSlicedFile(sliced)}
+        <div class="bb-empty">${sliced.valid ? 'Кількість деталей визначено з пластини. За потреби її можна виправити.' : 'Завантажте з Bambu Studio файл Export plate sliced file.'}</div>
         ${canQueue ? `
           <form class="bb-form" id="bb-queue-form">
-            <label class="bb-field"><span>Деталей на платформі</span><input name="units" type="number" min="1" max="999" value="1" required></label>
+            <label class="bb-field"><span>Деталей на платформі</span><input name="units" type="number" min="1" max="999" value="${escapeHtml(recommendedUnits)}" required></label>
             <label class="bb-field"><span>Номер платформи</span><input name="plate" type="number" min="0" placeholder="авто"></label>
             <label class="bb-field"><span>Принтер</span><select name="printer">${printerOptions(state.printers)}</select></label>
             <label class="bb-field"><span><input name="overproduction" type="checkbox"> дозволити перевиробництво</span></label>
-            <button class="bb-button" type="submit" ${state.has_3mf ? '' : 'disabled'}>Передати в Bambuddy</button>
+            <button class="bb-button" type="submit" ${sliced.valid ? '' : 'disabled'}>Передати в Bambuddy</button>
           </form>` : ''}
       `}`;
 

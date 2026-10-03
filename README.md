@@ -16,11 +16,13 @@ handler. A `.3mf` attachment is preferred; if none exists, the newest STEP/STP
 attachment is opened. The helper keeps the original filename and never uses the
 browser's Downloads folder.
 
-On Build Order pages the same plugin adds a **Bambuddy друк** panel. It can send
-the Part's latest `.3mf` attachment to the Bambuddy queue and shows the Batch,
-individual plate runs, printer, live progress, remaining time, completed parts
-and failures. The plugin proxies these requests through InvenTree, so the sync
-service token is never exposed to the browser.
+On Build Order pages the same plugin adds a **Bambuddy друк** panel. It validates
+the Part's latest sliced `.gcode.3mf`, reads the plate object count, estimated
+time, filament weight, material, colour, printer and nozzle, then sends the file
+to the Bambuddy queue. The panel also shows the Batch, individual plate runs,
+printer, live progress, remaining time, completed parts and failures. The plugin
+proxies these requests through InvenTree, so the sync service token is never
+exposed to the browser.
 
 ## Requirements
 
@@ -57,7 +59,7 @@ docker compose \
 
 Collect the Part action frontend asset, then restart the static web container.
 The Build Order panel module is served directly by the plugin as of version
-`0.4.4`, so panel updates do not depend on a separate static-file collection.
+`0.4.5`, so panel updates do not depend on a separate static-file collection.
 The container names below match the standard names used in the example
 deployment; adjust them if yours differ:
 
@@ -81,9 +83,9 @@ To target another InvenTree image version, set `INVENTREE_VERSION` before the bu
 
 ## Printing a Build Order
 
-1. Attach the sliced `.3mf` project to the printable Part.
+1. In Bambu Studio slice the plate, select **Export plate sliced file**, and attach the resulting `.gcode.3mf` to the printable Part. Renaming a normal `.3mf` is not sufficient.
 2. Create a Build Order for that Part and open its **Bambuddy друк** panel.
-3. Enter how many physical parts are placed on one plate, optionally select a plate and printer, and select **Передати в Bambuddy**.
+3. Check the extracted plate summary. The number of printable objects is inserted as the number of parts per plate; correct it manually if one physical product consists of multiple objects. Optionally select a plate and printer, then select **Передати в Bambuddy**.
 4. Track each run in the same panel. The panel refreshes automatically every five seconds.
 5. As soon as a plate starts, the sidecar creates a native **Incomplete Output** whose quantity is the configured number of physical parts on that plate.
 6. After a successful print, the sidecar writes the calculated unit Purchase Price but leaves the output incomplete. Complete it manually in InvenTree and select the final Stock Location yourself.

@@ -1,13 +1,42 @@
 import tempfile
 import unittest
 import gc
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 from bambuddy_inventree_sync.build_orders import BuildOrderService
 from bambuddy_inventree_sync.database import Database
 from bambuddy_inventree_sync.http_errors import BuildOrderError
 from bambuddy_inventree_sync.models import Archive, BuildOrderQueueRequest
+from bambuddy_inventree_sync.sliced_3mf import inspect_sliced_3mf
+
+
+def sliced_3mf_payload(object_count=2):
+    objects = "".join(
+        f'<object identify_id="{index}" name="Part {index}" skipped="false" />'
+        for index in range(1, object_count + 1)
+    )
+    slice_info = f'''<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <plate>
+    <metadata key="index" value="1" />
+    <metadata key="gcode_file" value="Metadata/plate_1.gcode" />
+    <metadata key="prediction" value="3661" />
+    <metadata key="weight" value="12.5" />
+    <metadata key="printer_model_id" value="BL-P001" />
+    <metadata key="nozzle_diameters" value="0.4" />
+    {objects}
+    <filament id="1" tray_info_idx="GFA00" type="PETG" color="#000000FF"
+      used_g="12.5" used_m="4.2" used_for_object="11.5" used_for_support="1.0" />
+  </plate>
+</config>'''
+    output = BytesIO()
+    with ZipFile(output, "w") as archive:
+        archive.writestr("Metadata/slice_info.config", slice_info)
+        archive.writestr("Metadata/plate_1.gcode", "; generated test gcode\nG28\n")
+    return output.getvalue()
 
 
 class FakeInvenTree:
@@ -40,10 +69,10 @@ class FakeInvenTree:
 
     async def list_part_attachments(self, part_id):
         assert part_id == 7
-        return [{"pk": 5, "filename": "PRINTED_PART.3mf", "attachment": "http://example/file.3mf"}]
+        return [{"pk": 5, "filename": "PRINTED_PART.gcode.3mf", "attachment": "http://example/file.gcode.3mf"}]
 
     async def download_attachment(self, attachment):
-        return b"3mf test payload", "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"
+        return sliced_3mf_payload(), "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"
 
     async def create_build_output(self, **kwargs):
         self.created_outputs.append(kwargs)
@@ -133,6 +162,12 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         self.tempdir.cleanup()
 
     async def test_enqueue_creates_one_queue_item_per_plate_run(self):
+        initial = await self.service.status(42)
+        self.assertTrue(initial["sliced_file"]["valid"])
+        self.assertEqual(initial["sliced_file"]["recommended_units_per_run"], 2)
+        self.assertEqual(initial["sliced_file"]["plates"][0]["print_time_seconds"], 3661.0)
+        self.assertEqual(initial["sliced_file"]["plates"][0]["filaments"][0]["type"], "PETG")
+
         result = await self.service.enqueue(
             42,
             BuildOrderQueueRequest(units_per_run=2, printer_id=1),
@@ -219,6 +254,34 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         queue_item = self.database.list_build_queue_items(42)[0]
         self.assertEqual(queue_item["build_output_stock_item_id"], 800)
         self.assertEqual(queue_item["output_status"], "incomplete")
+
+    async def test_plain_3mf_is_rejected_with_export_instruction(self):
+        async def plain_attachments(part_id):
+            return [{"pk": 6, "filename": "PRINTED_PART.3mf", "attachment": "http://example/file.3mf"}]
+
+        self.inventree.list_part_attachments = plain_attachments
+        state = await self.service.status(42)
+
+        self.assertFalse(state["sliced_file"]["valid"])
+        self.assertIn("Export plate sliced file", state["sliced_file"]["error"])
+        with self.assertRaisesRegex(BuildOrderError, "Export plate sliced file"):
+            await self.service.enqueue(42, BuildOrderQueueRequest(units_per_run=2))
+
+
+class Sliced3mfTests(unittest.TestCase):
+    def test_extracts_plate_and_filament_metadata(self):
+        result = inspect_sliced_3mf("part.gcode.3mf", sliced_3mf_payload(4))
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["recommended_units_per_run"], 4)
+        self.assertEqual(result["plates"][0]["filament_weight_grams"], 12.5)
+        self.assertEqual(result["plates"][0]["printer_model_id"], "BL-P001")
+
+    def test_renamed_unsliced_file_is_rejected(self):
+        result = inspect_sliced_3mf("part.gcode.3mf", b"not a 3mf archive")
+
+        self.assertFalse(result["valid"])
+        self.assertIn("Не вдалося прочитати", result["error"])
 
 
 if __name__ == "__main__":

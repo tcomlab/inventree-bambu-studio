@@ -39,8 +39,8 @@ The included `bambuddy-patch/` image fixes A1 Mini external-spool auto-unlinking
 
 New production printing starts from an InvenTree Build Order:
 
-1. The Build Order Part must have a `.3mf` attachment.
-2. The InvenTree plugin panel sends the Build Order to the sidecar with the number of physical parts on one plate.
+1. The Build Order Part must have a real sliced `.gcode.3mf` attachment exported with **Bambu Studio → Export plate sliced file**. A normal project `.3mf`, even if renamed, is rejected because it has no embedded G-code.
+2. The panel reads `Metadata/slice_info.config` and shows the printable-object count, estimated print time, estimated filament weight, filament type and colour, printer, nozzle and slicer warnings. The object count is inserted as the number of parts per plate and remains editable for multipart products.
 3. The sidecar uploads the attachment to the Bambuddy library by content hash, creates one Bambuddy Batch and creates one queue item for every required plate run.
 4. A Pending Build Order is issued and moves to Production only after the queue has been created successfully.
 5. Queue and printer state are shown in the **Bambuddy друк** panel on the Build Order page. While a printer is active, the panel also shows live percentage, remaining time and layer count.
@@ -212,7 +212,7 @@ curl.exe -X POST -H "X-Service-Token: change-me" http://localhost:8088/sync/purc
 }
 ```
 
-The `.3mf` file and Build Order quantity are resolved from InvenTree; callers do not provide file paths or finished-goods quantities.
+The `.gcode.3mf` file and Build Order quantity are resolved from InvenTree; callers do not provide file paths or finished-goods quantities.
 
 ## Bambuddy compatibility patch
 
@@ -237,7 +237,7 @@ Common causes:
 
 - `401`: invalid service, Bambuddy or InvenTree token;
 - no finished stock: archive is not completed or no matching printed Part exists;
-- Build Order cannot be queued: its Part has no `.3mf` attachment, its status is not Pending/Production, or the quantity is not divisible by `units_per_run`;
+- Build Order cannot be queued: its Part has no valid sliced `.gcode.3mf`, its status is not Pending/Production, or the quantity is not divisible by `units_per_run`;
 - no deduction: no matching filament StockItem is loaded in the expected equipment location;
 - missing cost: filament or printer `Purchase Price` is empty;
 - missing storage location: the InvenTree StockItem has no Stock Location;
