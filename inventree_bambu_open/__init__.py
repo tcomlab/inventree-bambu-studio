@@ -10,6 +10,7 @@ from urllib import request as urllib_request
 from common.models import Attachment
 from django.http import HttpResponse, JsonResponse
 from django.urls import path
+from InvenTree.permissions import auth_exempt
 from plugin import InvenTreePlugin
 from plugin.mixins import SettingsMixin, UrlsMixin, UserInterfaceMixin
 
@@ -59,7 +60,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.1"
+    VERSION = "0.4.2"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {
@@ -100,10 +101,9 @@ class BambuOpenPlugin(
             ),
         ]
 
+    @auth_exempt
     def build_order_panel_script_view(self, request):
         """Serve the panel module directly so plugin updates need no collectstatic run."""
-        if not request.user.is_authenticated:
-            return HttpResponse("Unauthorized", status=401)
         script = (
             resources.files(__package__)
             .joinpath("static", "build_order_panel_v1.js")
