@@ -66,7 +66,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.3"
+    VERSION = "0.4.4"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {
@@ -247,7 +247,7 @@ class BambuOpenPlugin(
         return [
             {
                 "key": f"bambu-open-{item.pk}",
-                "title": "3D Друк",
+                "title": "Відкрити у Bambu Studio",
                 "description": filename,
                 "icon": "ti:printer:outline",
                 "source": self.plugin_static_file(
