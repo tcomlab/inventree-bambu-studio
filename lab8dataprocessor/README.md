@@ -154,6 +154,7 @@ FILAMENT_CORE_WEIGHT_CATALOG_ID=
 BUILD_ORDER_SYNC_ENABLED=true
 BUILD_ORDER_AUTO_COMPLETE=true
 BUILD_ORDER_RECONCILE_ON_STARTUP=true
+BUILD_ORDER_POLL_INTERVAL_SECONDS=10
 
 BACKFILL_PAGE_SIZE=50
 POLL_INTERVAL_SECONDS=300
@@ -171,6 +172,7 @@ Important settings:
 - `BUILD_ORDER_SYNC_ENABLED`: enables Build Order to Bambuddy Batch orchestration.
 - `BUILD_ORDER_AUTO_COMPLETE`: completes a Build Order after all requested outputs are complete.
 - `BUILD_ORDER_RECONCILE_ON_STARTUP`: resumes incomplete Build Order synchronization after a container restart.
+- `BUILD_ORDER_POLL_INTERVAL_SECONDS`: checks active Bambuddy runs independently of the slower inventory sync. When a run enters `printing`, the service creates its InvenTree Build Output immediately; it remains in **Incomplete Outputs** until the archive is completed.
 - `POLL_INTERVAL_SECONDS`: automatic reconciliation interval; `0` disables polling.
 
 ## HTTP API

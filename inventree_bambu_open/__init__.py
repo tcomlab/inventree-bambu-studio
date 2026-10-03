@@ -36,11 +36,17 @@ def part_id_from_context(context):
 
 def build_id_from_context(context):
     """Extract the Build Order identifier from supported UI context shapes."""
-    if context.get("target_model") == "build":
-        candidate = context.get("target_id")
+    target_model = str(context.get("target_model") or context.get("targetModel") or "").lower()
+    if target_model in {"build", "buildorder", "build.build", "build.buildorder"}:
+        candidate = context.get("target_id") or context.get("targetId")
     else:
         match = BUILD_LOCATION_PATTERN.match(context.get("location", ""))
         candidate = match.group("build_id") if match else None
+
+    if candidate is None:
+        target = context.get("target") or context.get("item") or {}
+        if isinstance(target, dict):
+            candidate = target.get("pk") or target.get("id")
 
     try:
         return int(candidate)
@@ -60,7 +66,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.2"
+    VERSION = "0.4.3"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {
@@ -110,7 +116,7 @@ class BambuOpenPlugin(
             .read_text(encoding="utf-8")
         )
         response = HttpResponse(script, content_type="text/javascript; charset=utf-8")
-        response["Cache-Control"] = "private, max-age=300"
+        response["Cache-Control"] = "no-store"
         return response
 
     def build_order_status_view(self, request, build_order_id):

@@ -250,48 +250,60 @@ class BuildOrderService:
         return response
 
     async def reconcile(self) -> dict[str, int]:
-        counts = {"seen": 0, "outputs_synced": 0, "failed": 0, "completed": 0}
+        counts = {
+            "seen": 0,
+            "incomplete_outputs_created": 0,
+            "outputs_synced": 0,
+            "failed": 0,
+            "completed": 0,
+        }
         if not self.settings.build_order_sync_enabled:
             return counts
 
-        for record in self.database.list_active_build_order_records():
-            counts["seen"] += 1
-            build_order_id = int(record["build_order_id"])
-            try:
-                state = await self.status(build_order_id)
-                for item in self.database.list_build_queue_items(build_order_id):
-                    if (
-                        item.get("queue_status") == "completed"
-                        and item.get("archive_id")
-                        and item.get("output_status") != "completion_submitted"
-                        and self.archive_sync is not None
-                    ):
-                        await self.archive_sync.sync_archive_id(int(item["archive_id"]))
-                        counts["outputs_synced"] += 1
+        async with self._lock:
+            for record in self.database.list_active_build_order_records():
+                counts["seen"] += 1
+                build_order_id = int(record["build_order_id"])
+                try:
+                    state = await self.status(build_order_id)
+                    build = await self.inventree.get_build_order(build_order_id)
+                    counts["incomplete_outputs_created"] += await self._ensure_printing_outputs(
+                        build_order_id,
+                        build,
+                    )
 
-                build = await self.inventree.get_build_order(build_order_id)
-                terminal_runs = (
-                    state["progress"]["completed_runs"]
-                    + state["progress"]["failed_runs"]
-                    + state["progress"].get("cancelled_runs", 0)
-                )
-                if int(build.get("status") or 0) == 30:
-                    self.database.update_build_order_status(build_order_id, "cancelled")
-                elif int(build.get("status") or 0) == 40:
-                    self.database.update_build_order_status(build_order_id, "complete")
-                    counts["completed"] += 1
-                elif (
-                    self.settings.build_order_auto_complete
-                    and int(build.get("completed") or 0) >= int(math.ceil(float(build.get("quantity") or 0)))
-                    and terminal_runs >= int(record["planned_runs"])
-                    and state["progress"]["printing_runs"] == 0
-                    and state["progress"]["pending_runs"] == 0
-                ):
-                    await self.inventree.finish_build_order(build_order_id)
-                    self.database.update_build_order_status(build_order_id, "completion_submitted")
-            except Exception as exc:
-                self.database.update_build_order_status(build_order_id, "failed", str(exc))
-                counts["failed"] += 1
+                    for item in self.database.list_build_queue_items(build_order_id):
+                        if (
+                            item.get("queue_status") == "completed"
+                            and item.get("archive_id")
+                            and item.get("output_status") != "completion_submitted"
+                            and self.archive_sync is not None
+                        ):
+                            await self.archive_sync.sync_archive_id(int(item["archive_id"]))
+                            counts["outputs_synced"] += 1
+
+                    terminal_runs = (
+                        state["progress"]["completed_runs"]
+                        + state["progress"]["failed_runs"]
+                        + state["progress"].get("cancelled_runs", 0)
+                    )
+                    if int(build.get("status") or 0) == 30:
+                        self.database.update_build_order_status(build_order_id, "cancelled")
+                    elif int(build.get("status") or 0) == 40:
+                        self.database.update_build_order_status(build_order_id, "complete")
+                        counts["completed"] += 1
+                    elif (
+                        self.settings.build_order_auto_complete
+                        and int(build.get("completed") or 0) >= int(math.ceil(float(build.get("quantity") or 0)))
+                        and terminal_runs >= int(record["planned_runs"])
+                        and state["progress"]["printing_runs"] == 0
+                        and state["progress"]["pending_runs"] == 0
+                    ):
+                        await self.inventree.finish_build_order(build_order_id)
+                        self.database.update_build_order_status(build_order_id, "completion_submitted")
+                except Exception as exc:
+                    self.database.update_build_order_status(build_order_id, "failed", str(exc))
+                    counts["failed"] += 1
         return counts
 
     async def find_queue_item_for_archive(self, archive_id: int) -> dict[str, Any] | None:
@@ -347,21 +359,7 @@ class BuildOrderService:
 
         build_order_id = int(item["build_order_id"])
         build = await self.inventree.get_build_order(build_order_id)
-        stock_item_id = self._optional_int(item.get("build_output_stock_item_id"))
-        output_status = item.get("output_status")
-        if stock_item_id is None:
-            reference = str(build.get("reference") or f"BO-{build_order_id}")
-            output = await self.inventree.create_build_output(
-                build_order_id=build_order_id,
-                quantity=int(item["planned_quantity"]),
-                batch_code=f"{reference}-A{archive.id}"[:100],
-                location_id=int(build.get("destination") or self.settings.inventree_stock_location_id),
-            )
-            stock_item_id = int(output.get("pk") or output.get("id"))
-            self.database.set_build_output_stock_item(
-                int(item["queue_item_id"]), stock_item_id, "created"
-            )
-            output_status = "created"
+        stock_item_id, output_status = await self._ensure_build_output(build, item)
 
         if purchase_price is not None:
             await self.inventree.update_stock_purchase_price(stock_item_id, purchase_price)
@@ -384,6 +382,62 @@ class BuildOrderService:
             "part_key": str(build.get("reference") or f"BO-{build_order_id}"),
             "stock_item_id": stock_item_id,
         }
+
+    async def _ensure_printing_outputs(
+        self,
+        build_order_id: int,
+        build: dict[str, Any],
+    ) -> int:
+        """Create one incomplete InvenTree output as soon as each run starts."""
+        created = 0
+        for item in self.database.list_build_queue_items(build_order_id):
+            if item.get("queue_status") != "printing":
+                continue
+            if self._optional_int(item.get("build_output_stock_item_id")) is not None:
+                continue
+            await self._ensure_build_output(build, item)
+            created += 1
+        return created
+
+    async def _ensure_build_output(
+        self,
+        build: dict[str, Any],
+        item: dict[str, Any],
+    ) -> tuple[int, str]:
+        stock_item_id = self._optional_int(item.get("build_output_stock_item_id"))
+        output_status = str(item.get("output_status") or "")
+        if stock_item_id is not None:
+            return stock_item_id, output_status
+
+        build_order_id = int(item["build_order_id"])
+        batch_code = self._output_batch_code(build, item)
+        existing = await self.inventree.find_stock_by_batch(
+            part_id=int(build.get("part") or 0),
+            batch=batch_code,
+        )
+        if existing:
+            stock_item_id = int(existing.get("pk") or existing.get("id"))
+        else:
+            output = await self.inventree.create_build_output(
+                build_order_id=build_order_id,
+                quantity=int(item["planned_quantity"]),
+                batch_code=batch_code,
+                location_id=int(build.get("destination") or self.settings.inventree_stock_location_id),
+            )
+            stock_item_id = int(output.get("pk") or output.get("id"))
+
+        self.database.set_build_output_stock_item(
+            int(item["queue_item_id"]),
+            stock_item_id,
+            "incomplete",
+        )
+        return stock_item_id, "incomplete"
+
+    @staticmethod
+    def _output_batch_code(build: dict[str, Any], item: dict[str, Any]) -> str:
+        reference = str(build.get("reference") or f"BO-{item['build_order_id']}").strip()
+        suffix = f"-R{int(item['run_number']):03d}-Q{int(item['queue_item_id'])}"
+        return f"{reference[:max(1, 100 - len(suffix))]}{suffix}"
 
     async def _ensure_queue_items(
         self,

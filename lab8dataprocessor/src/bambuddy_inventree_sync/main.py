@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
 
     stop_event = asyncio.Event()
     poll_task: asyncio.Task[Any] | None = None
+    build_order_poll_task: asyncio.Task[Any] | None = None
 
     async def poll_loop() -> None:
         while not stop_event.is_set():
@@ -74,11 +75,24 @@ async def lifespan(app: FastAPI):
                 await sync_service.backfill()
                 await sync_service.assign_missing_filament_batches()
                 await sync_service.reconcile_filament_inventory()
-                await build_orders.reconcile()
             except Exception:
                 logger.exception("Scheduled sync failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=settings.poll_interval_seconds)
+            except TimeoutError:
+                continue
+
+    async def build_order_poll_loop() -> None:
+        while not stop_event.is_set():
+            try:
+                await build_orders.reconcile()
+            except Exception:
+                logger.exception("Scheduled Build Order reconciliation failed")
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings.build_order_poll_interval_seconds,
+                )
             except TimeoutError:
                 continue
 
@@ -96,6 +110,8 @@ async def lifespan(app: FastAPI):
 
     if settings.poll_interval_seconds > 0:
         poll_task = asyncio.create_task(poll_loop())
+    if settings.build_order_poll_interval_seconds > 0:
+        build_order_poll_task = asyncio.create_task(build_order_poll_loop())
 
     try:
         yield
@@ -103,6 +119,8 @@ async def lifespan(app: FastAPI):
         stop_event.set()
         if poll_task:
             poll_task.cancel()
+        if build_order_poll_task:
+            build_order_poll_task.cancel()
         await bambuddy.close()
         await inventree.close()
 
@@ -196,8 +214,10 @@ async def build_order_status(request: Request, build_order_id: int) -> dict[str,
     try:
         return await service.status(build_order_id)
     except BuildOrderError as exc:
+        logger.warning("Build Order %s status request rejected: %s", build_order_id, exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ExternalApiError as exc:
+        logger.exception("Build Order %s status request failed", build_order_id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -211,8 +231,10 @@ async def queue_build_order(
     try:
         return await service.enqueue(build_order_id, options)
     except BuildOrderError as exc:
+        logger.warning("Build Order %s queue request rejected: %s", build_order_id, exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ExternalApiError as exc:
+        logger.exception("Build Order %s queue request failed", build_order_id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

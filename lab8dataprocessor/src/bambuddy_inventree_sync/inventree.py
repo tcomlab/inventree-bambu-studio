@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -117,7 +118,16 @@ class InvenTreeClient:
         url = attachment.get("attachment")
         if not url:
             raise ExternalApiError(f"InvenTree attachment {attachment.get('pk')} has no file URL")
-        response = await self.client.get(str(url))
+
+        # InvenTree can return media links as ``media/...`` (without a leading
+        # slash). Resolving that value against the API client's base URL would
+        # incorrectly request ``/api/media/...``. Always resolve attachment
+        # paths against the InvenTree web root instead.
+        download_url = str(url)
+        if not urlparse(download_url).scheme:
+            download_url = urljoin(f"{self.settings.inventree_browser_url}/", download_url.lstrip("/"))
+
+        response = await self.client.get(download_url)
         if response.status_code >= 400:
             body = response.text[:1000]
             raise ExternalApiError(

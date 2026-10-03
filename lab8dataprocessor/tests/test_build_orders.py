@@ -49,6 +49,9 @@ class FakeInvenTree:
         self.created_outputs.append(kwargs)
         return {"pk": 800}
 
+    async def find_stock_by_batch(self, *, part_id, batch):
+        return None
+
     async def update_stock_purchase_price(self, stock_item_id, purchase_price):
         self.updated_prices.append((stock_item_id, purchase_price))
 
@@ -178,6 +181,21 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(self.inventree.created_outputs), 1)
         self.assertEqual(len(self.inventree.completed_outputs), 1)
+
+    async def test_printing_queue_item_appears_as_incomplete_output(self):
+        await self.service.enqueue(42, BuildOrderQueueRequest(units_per_run=2, printer_id=1))
+        self.bambuddy.queue[0]["status"] = "printing"
+
+        first = await self.service.reconcile()
+        second = await self.service.reconcile()
+
+        self.assertEqual(first["incomplete_outputs_created"], 1)
+        self.assertEqual(second["incomplete_outputs_created"], 0)
+        self.assertEqual(len(self.inventree.created_outputs), 1)
+        self.assertEqual(self.inventree.created_outputs[0]["quantity"], 2)
+        queue_item = self.database.list_build_queue_items(42)[0]
+        self.assertEqual(queue_item["build_output_stock_item_id"], 800)
+        self.assertEqual(queue_item["output_status"], "incomplete")
 
 
 if __name__ == "__main__":
