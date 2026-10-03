@@ -55,9 +55,11 @@ docker compose \
   up -d --no-build server worker
 ```
 
-Collect the plugin's frontend asset, then restart the static web container. The
-container names below match the standard names used in the example deployment;
-adjust them if yours differ:
+Collect the Part action frontend asset, then restart the static web container.
+The Build Order panel module is served directly by the plugin as of version
+`0.4.1`, so panel updates do not depend on a separate static-file collection.
+The container names below match the standard names used in the example
+deployment; adjust them if yours differ:
 
 ```bash
 docker exec -w /home/inventree/src/backend/InvenTree \

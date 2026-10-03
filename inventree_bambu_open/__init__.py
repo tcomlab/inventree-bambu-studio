@@ -1,13 +1,14 @@
 """InvenTree integration for Bambu Studio and Bambuddy print production."""
 
 import json
+from importlib import resources
 from pathlib import PurePosixPath
 import re
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from common.models import Attachment
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from plugin import InvenTreePlugin
 from plugin.mixins import SettingsMixin, UrlsMixin, UserInterfaceMixin
@@ -58,7 +59,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.0"
+    VERSION = "0.4.1"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {
@@ -83,6 +84,11 @@ class BambuOpenPlugin(
         """Provide authenticated same-origin proxies for the Build Order panel."""
         return [
             path(
+                "assets/build_order_panel_v1.js",
+                self.build_order_panel_script_view,
+                name="build-order-panel-script",
+            ),
+            path(
                 "build-order/<int:build_order_id>/",
                 self.build_order_status_view,
                 name="build-order-status",
@@ -93,6 +99,19 @@ class BambuOpenPlugin(
                 name="build-order-queue",
             ),
         ]
+
+    def build_order_panel_script_view(self, request):
+        """Serve the panel module directly so plugin updates need no collectstatic run."""
+        if not request.user.is_authenticated:
+            return HttpResponse("Unauthorized", status=401)
+        script = (
+            resources.files(__package__)
+            .joinpath("static", "build_order_panel_v1.js")
+            .read_text(encoding="utf-8")
+        )
+        response = HttpResponse(script, content_type="text/javascript; charset=utf-8")
+        response["Cache-Control"] = "private, max-age=300"
+        return response
 
     def build_order_status_view(self, request, build_order_id):
         if not request.user.is_authenticated or not request.user.has_perm("build.view_build"):
@@ -165,8 +184,9 @@ class BambuOpenPlugin(
                 "title": "Bambuddy друк",
                 "description": "Черга і поточний стан друку",
                 "icon": "ti:printer:outline",
-                "source": self.plugin_static_file(
-                    "build_order_panel_v1.js:renderBuildOrderPanel"
+                "source": (
+                    f"/plugin/{self.SLUG}/assets/build_order_panel_v1.js"
+                    ":renderBuildOrderPanel"
                 ),
                 "context": {
                     "buildId": build_id,
