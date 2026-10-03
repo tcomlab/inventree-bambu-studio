@@ -118,7 +118,6 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         self.bambuddy = FakeBambuddy()
         settings = SimpleNamespace(
             build_order_sync_enabled=True,
-            build_order_auto_complete=True,
             inventree_stock_location_id=99,
             inventree_stock_status=10,
         )
@@ -158,7 +157,7 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BuildOrderError):
             await self.service.enqueue(42, BuildOrderQueueRequest(units_per_run=2))
 
-    async def test_completed_queue_item_becomes_build_output_once(self):
+    async def test_completed_queue_item_remains_incomplete_until_manual_completion(self):
         await self.service.enqueue(42, BuildOrderQueueRequest(units_per_run=2, printer_id=1))
         self.bambuddy.queue[0]["status"] = "completed"
         self.bambuddy.queue[0]["archive_id"] = 501
@@ -172,7 +171,10 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stock_item_id"], 800)
         self.assertEqual(self.inventree.created_outputs[0]["quantity"], 2)
         self.assertEqual(self.inventree.updated_prices, [(800, 12.5)])
-        self.assertEqual(len(self.inventree.completed_outputs), 1)
+        self.assertEqual(self.inventree.completed_outputs, [])
+        self.assertEqual(self.inventree.build["completed"], 0)
+        queue_item = self.database.list_build_queue_items(42)[0]
+        self.assertEqual(queue_item["output_status"], "printed_incomplete")
 
         await self.service.complete_archive_output(
             Archive(id=501, status="completed"),
@@ -180,7 +182,28 @@ class BuildOrderServiceTests(unittest.IsolatedAsyncioTestCase):
             notes="Bambuddy archive 501",
         )
         self.assertEqual(len(self.inventree.created_outputs), 1)
-        self.assertEqual(len(self.inventree.completed_outputs), 1)
+        self.assertEqual(self.inventree.completed_outputs, [])
+
+    async def test_ten_parts_on_four_part_plate_creates_four_part_outputs(self):
+        self.inventree.build["quantity"] = 10
+        result = await self.service.enqueue(
+            42,
+            BuildOrderQueueRequest(
+                units_per_run=4,
+                printer_id=1,
+                allow_overproduction=True,
+            ),
+        )
+
+        self.assertEqual(result["mapping"]["planned_runs"], 3)
+        self.assertEqual(
+            [item["planned_quantity"] for item in self.database.list_build_queue_items(42)],
+            [4, 4, 4],
+        )
+
+        self.bambuddy.queue[0]["status"] = "printing"
+        await self.service.reconcile()
+        self.assertEqual(self.inventree.created_outputs[0]["quantity"], 4)
 
     async def test_printing_queue_item_appears_as_incomplete_output(self):
         await self.service.enqueue(42, BuildOrderQueueRequest(units_per_run=2, printer_id=1))

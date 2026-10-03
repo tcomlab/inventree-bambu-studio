@@ -44,17 +44,17 @@ New production printing starts from an InvenTree Build Order:
 3. The sidecar uploads the attachment to the Bambuddy library by content hash, creates one Bambuddy Batch and creates one queue item for every required plate run.
 4. A Pending Build Order is issued and moves to Production only after the queue has been created successfully.
 5. Queue and printer state are shown in the **Bambuddy друк** panel on the Build Order page. While a printer is active, the panel also shows live percentage, remaining time and layer count.
-6. Every completed queue run creates and completes exactly one native InvenTree Build Output. The output quantity is the configured number of parts per plate.
-7. The finished StockItem receives the calculated unit Purchase Price. Filament deduction and printer-minute accounting continue to use the measured Bambuddy Archive values.
-8. When the requested quantity is complete and no runs remain, the service can complete the Build Order automatically.
+6. When a queue run starts, the service creates exactly one native InvenTree **Incomplete Output**. Its quantity is the configured number of physical parts per plate.
+7. After the run succeeds, the incomplete StockItem receives the calculated unit Purchase Price. Filament deduction and printer-minute accounting continue to use the measured Bambuddy Archive values.
+8. The operator completes each output manually in InvenTree, selects its final Stock Location, and completes the Build Order when appropriate. The service does not complete either step automatically.
 
 One Build Order maps to one Bambuddy Batch. A durable SQLite mapping prevents duplicate batches, queue items and Build Outputs across retries and container restarts.
 
-By default the Build Order quantity must be divisible by the number of parts per plate. The panel can explicitly allow overproduction for the final plate. This avoids silently reporting fewer physical parts than were printed.
+By default the Build Order quantity must be divisible by the number of parts per plate. The panel can explicitly allow overproduction for the final plate. Every run still reports the physical number of parts on the plate: a target of 10 with four parts per plate creates three Incomplete Outputs of four parts each, for 12 physical parts.
 
 ### Print completion
 
-For every successful Bambuddy archive linked to a managed Build Order the service creates a Build Output. For legacy or manually started prints which are not linked to a managed Build Order, the compatibility path still:
+For every successful Bambuddy archive linked to a managed Build Order the service keeps its Build Output incomplete for manual acceptance. For legacy or manually started prints which are not linked to a managed Build Order, the compatibility path still:
 
 1. Resolves an existing InvenTree Part in `INVENTREE_PART_CATEGORY_ID` by archive name, print name, filename or filename stem.
 2. Deducts the used filament grams from the StockItem loaded in the printer/AMS location when `FILAMENT_DEDUCTION_ENABLED=true`.
@@ -152,7 +152,6 @@ FILAMENT_DEFAULT_LABEL_WEIGHT=1000
 FILAMENT_CORE_WEIGHT_CATALOG_ID=
 
 BUILD_ORDER_SYNC_ENABLED=true
-BUILD_ORDER_AUTO_COMPLETE=true
 BUILD_ORDER_RECONCILE_ON_STARTUP=true
 BUILD_ORDER_POLL_INTERVAL_SECONDS=10
 
@@ -170,9 +169,8 @@ Important settings:
 - `FILAMENT_PART_CATEGORY_ID`: `PARTS/FILAMENT` category containing filament Parts.
 - `FILAMENT_EQUIPMENT_LOCATION_PATH`: root path containing B1–B4 and B1 AMS locations.
 - `BUILD_ORDER_SYNC_ENABLED`: enables Build Order to Bambuddy Batch orchestration.
-- `BUILD_ORDER_AUTO_COMPLETE`: completes a Build Order after all requested outputs are complete.
 - `BUILD_ORDER_RECONCILE_ON_STARTUP`: resumes incomplete Build Order synchronization after a container restart.
-- `BUILD_ORDER_POLL_INTERVAL_SECONDS`: checks active Bambuddy runs independently of the slower inventory sync. When a run enters `printing`, the service creates its InvenTree Build Output immediately; it remains in **Incomplete Outputs** until the archive is completed.
+- `BUILD_ORDER_POLL_INTERVAL_SECONDS`: checks active Bambuddy runs independently of the slower inventory sync. When a run enters `printing`, the service creates its InvenTree Build Output immediately; it remains in **Incomplete Outputs** until an operator completes it manually.
 - `POLL_INTERVAL_SECONDS`: automatic reconciliation interval; `0` disables polling.
 
 ## HTTP API

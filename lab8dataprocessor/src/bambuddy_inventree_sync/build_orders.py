@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import math
 from pathlib import PurePosixPath
 from typing import Any, TYPE_CHECKING
 
@@ -276,31 +275,17 @@ class BuildOrderService:
                         if (
                             item.get("queue_status") == "completed"
                             and item.get("archive_id")
-                            and item.get("output_status") != "completion_submitted"
+                            and item.get("output_status") not in {"printed_incomplete", "completion_submitted"}
                             and self.archive_sync is not None
                         ):
                             await self.archive_sync.sync_archive_id(int(item["archive_id"]))
                             counts["outputs_synced"] += 1
 
-                    terminal_runs = (
-                        state["progress"]["completed_runs"]
-                        + state["progress"]["failed_runs"]
-                        + state["progress"].get("cancelled_runs", 0)
-                    )
                     if int(build.get("status") or 0) == 30:
                         self.database.update_build_order_status(build_order_id, "cancelled")
                     elif int(build.get("status") or 0) == 40:
                         self.database.update_build_order_status(build_order_id, "complete")
                         counts["completed"] += 1
-                    elif (
-                        self.settings.build_order_auto_complete
-                        and int(build.get("completed") or 0) >= int(math.ceil(float(build.get("quantity") or 0)))
-                        and terminal_runs >= int(record["planned_runs"])
-                        and state["progress"]["printing_runs"] == 0
-                        and state["progress"]["pending_runs"] == 0
-                    ):
-                        await self.inventree.finish_build_order(build_order_id)
-                        self.database.update_build_order_status(build_order_id, "completion_submitted")
                 except Exception as exc:
                     self.database.update_build_order_status(build_order_id, "failed", str(exc))
                     counts["failed"] += 1
@@ -364,16 +349,13 @@ class BuildOrderService:
         if purchase_price is not None:
             await self.inventree.update_stock_purchase_price(stock_item_id, purchase_price)
 
-        if output_status != "completion_submitted":
-            await self.inventree.complete_build_output(
-                build_order_id=build_order_id,
-                stock_item_id=stock_item_id,
-                quantity=int(item["planned_quantity"]),
-                location_id=int(build.get("destination") or self.settings.inventree_stock_location_id),
-                notes=notes,
-            )
+        # A successful print remains an Incomplete Output. The operator completes
+        # it manually in InvenTree and chooses the final Stock Location there.
+        # Mark the archive as processed locally so the reconcile loop does not
+        # submit the same finished print again.
+        if output_status not in {"printed_incomplete", "completion_submitted"}:
             self.database.set_build_output_stock_item(
-                int(item["queue_item_id"]), stock_item_id, "completion_submitted"
+                int(item["queue_item_id"]), stock_item_id, "printed_incomplete"
             )
 
         return {

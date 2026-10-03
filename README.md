@@ -85,7 +85,10 @@ To target another InvenTree image version, set `INVENTREE_VERSION` before the bu
 2. Create a Build Order for that Part and open its **Bambuddy друк** panel.
 3. Enter how many physical parts are placed on one plate, optionally select a plate and printer, and select **Передати в Bambuddy**.
 4. Track each run in the same panel. The panel refreshes automatically every five seconds.
-5. On successful completion the sidecar creates a native Build Output and places the completed stock in the Build Order destination, or the configured finished-goods location when no destination is selected.
+5. As soon as a plate starts, the sidecar creates a native **Incomplete Output** whose quantity is the configured number of physical parts on that plate.
+6. After a successful print, the sidecar writes the calculated unit Purchase Price but leaves the output incomplete. Complete it manually in InvenTree and select the final Stock Location yourself.
+
+The service never completes the Build Order automatically. For example, a quantity of 10 with four parts per plate and explicitly allowed overproduction creates three runs and three Incomplete Outputs of four parts each (12 physical parts).
 
 Repeated clicks and service restarts do not duplicate the Bambuddy Batch, queue items or Build Output.
 
