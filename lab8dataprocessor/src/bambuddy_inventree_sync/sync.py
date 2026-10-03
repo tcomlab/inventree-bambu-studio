@@ -371,6 +371,26 @@ class ArchiveSyncService:
                     part_key=str(build_output["part_key"]),
                 )
 
+        if not self.settings.legacy_finished_stock_enabled:
+            printer_time = await self.track_printer_time(archive)
+            self.database.upsert_record(
+                archive_id=archive.id,
+                sync_status="synced",
+                archive_status=archive.status,
+                raw_archive=archive.model_dump(),
+            )
+            return SyncResult(
+                archive_id=archive.id,
+                status="synced",
+                message=self._sync_message(
+                    self._sync_message(
+                        "Print is not linked to a Build Order; finished StockItem creation is disabled",
+                        deduction,
+                    ),
+                    printer_time,
+                ),
+            )
+
         part_references = self.part_references_for_archive(archive)
         part = None
         part_reference = part_references[0]
@@ -474,7 +494,9 @@ class ArchiveSyncService:
         if duration_seconds is None or duration_seconds <= 0 or not printer_name:
             return "printer time skipped: duration or printer is unavailable"
 
-        minutes = duration_seconds / 60.0
+        # InvenTree Stock quantity uses a bounded decimal field. Repeating
+        # fractions such as 1 / 60 otherwise exceed its maximum digit count.
+        minutes = round(duration_seconds / 60.0, 4)
         try:
             printer_item = await self.printer_stock_item(printer_name)
             if not printer_item:

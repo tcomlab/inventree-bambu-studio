@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     filament_default_label_weight: int = 1000
     filament_core_weight_catalog_id: int | None = None
     build_order_sync_enabled: bool = True
+    legacy_finished_stock_enabled: bool = False
     build_order_reconcile_on_startup: bool = True
     build_order_poll_interval_seconds: Annotated[int, Field(ge=0)] = 10
     backfill_page_size: Annotated[int, Field(ge=1, le=250)] = 50

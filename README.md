@@ -90,6 +90,8 @@ To target another InvenTree image version, set `INVENTREE_VERSION` before the bu
 
 The service never completes the Build Order automatically. For example, a quantity of 10 with four parts per plate and explicitly allowed overproduction creates three runs and three Incomplete Outputs of four parts each (12 physical parts).
 
+Successful prints started directly in Bambuddy without a managed Build Order do not create finished StockItems. Filament usage and printer working time are still recorded.
+
 Repeated clicks and service restarts do not duplicate the Bambuddy Batch, queue items or Build Output.
 
 ## Windows helper installation

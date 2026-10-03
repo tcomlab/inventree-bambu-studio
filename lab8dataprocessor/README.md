@@ -54,14 +54,12 @@ By default the Build Order quantity must be divisible by the number of parts per
 
 ### Print completion
 
-For every successful Bambuddy archive linked to a managed Build Order the service keeps its Build Output incomplete for manual acceptance. For legacy or manually started prints which are not linked to a managed Build Order, the compatibility path still:
+For every successful Bambuddy archive linked to a managed Build Order the service keeps its Build Output incomplete for manual acceptance. Prints started directly in Bambuddy without a managed Build Order do **not** create finished StockItems. They only:
 
-1. Resolves an existing InvenTree Part in `INVENTREE_PART_CATEGORY_ID` by archive name, print name, filename or filename stem.
-2. Deducts the used filament grams from the StockItem loaded in the printer/AMS location when `FILAMENT_DEDUCTION_ENABLED=true`.
-3. Creates one finished-goods StockItem at `INVENTREE_STOCK_LOCATION_ID` with batch `bambuddy-<archive_id>`.
-4. Uses the actual printed object count as quantity, falling back to `DEFAULT_STOCK_QUANTITY`.
-5. Calculates and writes the unit `Purchase Price`.
-6. Adds the actual print duration in minutes to the printer StockItem.
+1. Deduct the used filament grams from the StockItem loaded in the printer/AMS location when `FILAMENT_DEDUCTION_ENABLED=true`.
+2. Add the actual print duration in minutes to the printer StockItem.
+
+The old direct-print finished-stock path can be restored temporarily with `LEGACY_FINISHED_STOCK_ENABLED=true`, but it is disabled by default.
 
 The finished-goods unit price is:
 
@@ -152,6 +150,7 @@ FILAMENT_DEFAULT_LABEL_WEIGHT=1000
 FILAMENT_CORE_WEIGHT_CATALOG_ID=
 
 BUILD_ORDER_SYNC_ENABLED=true
+LEGACY_FINISHED_STOCK_ENABLED=false
 BUILD_ORDER_RECONCILE_ON_STARTUP=true
 BUILD_ORDER_POLL_INTERVAL_SECONDS=10
 
@@ -169,6 +168,7 @@ Important settings:
 - `FILAMENT_PART_CATEGORY_ID`: `PARTS/FILAMENT` category containing filament Parts.
 - `FILAMENT_EQUIPMENT_LOCATION_PATH`: root path containing B1–B4 and B1 AMS locations.
 - `BUILD_ORDER_SYNC_ENABLED`: enables Build Order to Bambuddy Batch orchestration.
+- `LEGACY_FINISHED_STOCK_ENABLED`: opt-in compatibility mode which creates finished StockItems for successful prints not linked to a Build Order. Keep this `false` for the Build Order workflow.
 - `BUILD_ORDER_RECONCILE_ON_STARTUP`: resumes incomplete Build Order synchronization after a container restart.
 - `BUILD_ORDER_POLL_INTERVAL_SECONDS`: checks active Bambuddy runs independently of the slower inventory sync. When a run enters `printing`, the service creates its InvenTree Build Output immediately; it remains in **Incomplete Outputs** until an operator completes it manually.
 - `POLL_INTERVAL_SECONDS`: automatic reconciliation interval; `0` disables polling.
