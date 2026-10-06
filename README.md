@@ -59,7 +59,7 @@ docker compose \
 
 Collect the Part action frontend asset, then restart the static web container.
 The Build Order panel module is served directly by the plugin as of version
-`0.4.5`, so panel updates do not depend on a separate static-file collection.
+`0.4.6`, so panel updates do not depend on a separate static-file collection.
 The container names below match the standard names used in the example
 deployment; adjust them if yours differ:
 
@@ -72,6 +72,10 @@ docker compose restart web
 
 Open **Settings → Plugins** in InvenTree and enable **Bambu Studio**. Both the
 server and worker must use the plugin-enabled image.
+
+Set the standard InvenTree `site_url` / `INVENTREE_SITE_URL` option to the
+canonical public HTTPS origin. The Part action uses this value for attachment
+downloads even when an operator opens InvenTree through a local HTTP address.
 
 Configure these plugin settings:
 

@@ -5,9 +5,11 @@ from importlib import resources
 from pathlib import PurePosixPath
 import re
 from urllib import error as urllib_error
+from urllib.parse import urljoin, urlsplit
 from urllib import request as urllib_request
 
 from common.models import Attachment
+from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from InvenTree.permissions import auth_exempt
@@ -66,7 +68,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.5"
+    VERSION = "0.4.6"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {
@@ -239,10 +241,17 @@ class BambuOpenPlugin(
             candidates[0],
         )
         item, filename, _ = selected
-        download_url = item.attachment.url
-
-        if request is not None:
-            download_url = request.build_absolute_uri(download_url)
+        public_url = str(getattr(settings, "SITE_URL", "") or "").strip().rstrip("/")
+        if public_url:
+            download_url = urljoin(f"{public_url}/", item.attachment.url)
+            instance_url = public_url
+        elif request is not None:
+            download_url = request.build_absolute_uri(item.attachment.url)
+            parsed_request_url = urlsplit(request.build_absolute_uri("/"))
+            instance_url = f"{parsed_request_url.scheme}://{parsed_request_url.netloc}"
+        else:
+            download_url = item.attachment.url
+            instance_url = ""
 
         return [
             {
@@ -251,13 +260,14 @@ class BambuOpenPlugin(
                 "description": filename,
                 "icon": "ti:printer:outline",
                 "source": self.plugin_static_file(
-                    "bambu_open_v5.js:openBambuAttachment"
+                    "bambu_open_v6.js:openBambuAttachment"
                 ),
                 "context": {
                     "url": download_url,
                     "filename": filename,
                     "partId": part_id,
                     "attachmentId": item.pk,
+                    "instanceUrl": instance_url,
                 },
                 "options": {"color": "green"},
             }
