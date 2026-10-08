@@ -1,5 +1,6 @@
 param(
-    [switch]$UploadNow
+    [switch]$UploadNow,
+    [switch]$ImportGCodeNow
 )
 
 $ErrorActionPreference = 'Stop'
@@ -88,7 +89,35 @@ function Select-ProjectFile {
     return $dialog.FileName
 }
 
-function Upload-ProjectToInvenTree {
+function Select-GCodeFile {
+    param([object]$Session)
+
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Title = 'Select G-code to import into the active InvenTree Part'
+    $dialog.Filter = 'Bambu G-code (*.gcode.3mf;*.gcode)|*.gcode.3mf;*.gcode|Sliced plate (*.gcode.3mf)|*.gcode.3mf|Raw G-code (*.gcode)|*.gcode'
+    $dialog.CheckFileExists = $true
+    $dialog.InitialDirectory = [IO.Path]::GetDirectoryName($Session.sourcePath)
+
+    if ($Session.PSObject.Properties.Name -contains 'lastGCodePath' -and
+        (Test-Path -LiteralPath $Session.lastGCodePath)) {
+        $dialog.InitialDirectory = [IO.Path]::GetDirectoryName($Session.lastGCodePath)
+        $dialog.FileName = [IO.Path]::GetFileName($Session.lastGCodePath)
+    }
+    else {
+        $dialog.FileName = [IO.Path]::ChangeExtension(
+            [IO.Path]::GetFileName($Session.sourcePath),
+            '.gcode.3mf'
+        )
+    }
+
+    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        return $null
+    }
+
+    return $dialog.FileName
+}
+
+function Get-ValidatedSession {
     $session = Get-CurrentSession
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
     $instanceUrl = [Uri]$session.instanceUrl
@@ -98,77 +127,224 @@ function Upload-ProjectToInvenTree {
         throw 'The active InvenTree instance is not allowed by the helper configuration.'
     }
 
-    $projectPath = Select-ProjectFile -Session $session
-    if (-not $projectPath) {
-        return
-    }
+    return $session
+}
 
-    if ([IO.Path]::GetExtension($projectPath).ToLowerInvariant() -ne '.3mf') {
-        throw 'Only a Bambu Studio .3mf project can be saved to InvenTree.'
-    }
+function Get-AttachmentFilename {
+    param([object]$Attachment)
 
-    $apiToken = Get-ApiToken
-    $filename = [IO.Path]::GetFileName($projectPath)
-    $attachmentId = $session.threeMfAttachmentId
-    $endpoint = if ($attachmentId) {
-        '{0}/api/attachment/{1}/' -f $session.instanceUrl.TrimEnd('/'), $attachmentId
-    }
-    else {
-        '{0}/api/attachment/' -f $session.instanceUrl.TrimEnd('/')
-    }
-
-    $client = New-Object System.Net.Http.HttpClient
-    $client.DefaultRequestHeaders.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Token', $apiToken)
-    $multipart = New-Object System.Net.Http.MultipartFormDataContent
-    $fileStream = [IO.File]::Open($projectPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-    $fileContent = New-Object System.Net.Http.StreamContent($fileStream)
-    $fileContent.Headers.ContentType = New-Object System.Net.Http.Headers.MediaTypeHeaderValue('application/octet-stream')
-    $multipart.Add($fileContent, 'attachment', $filename)
-
-    if ($attachmentId) {
-        $multipart.Add((New-Object System.Net.Http.StringContent($filename)), 'filename')
-    }
-    else {
-        $multipart.Add((New-Object System.Net.Http.StringContent('part')), 'model_type')
-        $multipart.Add((New-Object System.Net.Http.StringContent([string]$session.partId)), 'model_id')
-        $multipart.Add((New-Object System.Net.Http.StringContent('Saved from Bambu Studio')), 'comment')
-    }
-
-    $method = if ($attachmentId) { New-Object System.Net.Http.HttpMethod('PATCH') } else { [System.Net.Http.HttpMethod]::Post }
-    $request = New-Object System.Net.Http.HttpRequestMessage($method, $endpoint)
-    $request.Content = $multipart
-
-    try {
-        $response = $client.SendAsync($request).GetAwaiter().GetResult()
-        $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-        if (-not $response.IsSuccessStatusCode) {
-            throw "InvenTree returned HTTP $([int]$response.StatusCode): $responseBody"
-        }
-
-        $result = $responseBody | ConvertFrom-Json
-        if (-not $attachmentId -and $result.pk) {
-            $session.threeMfAttachmentId = [int]$result.pk
-        }
-
-        $session.expectedProjectPath = $projectPath
-        Save-CurrentSession -Session $session
-        Write-HelperLog "Uploaded $filename to InvenTree Part $($session.partId)"
+    $filename = [IO.Path]::GetFileName([string]$Attachment.filename)
+    if (-not [string]::IsNullOrWhiteSpace($filename)) {
         return $filename
     }
+
+    return [IO.Path]::GetFileName(([string]$Attachment.attachment).Split('?')[0])
+}
+
+function Find-PartAttachmentId {
+    param(
+        [System.Net.Http.HttpClient]$Client,
+        [object]$Session,
+        [string]$Filename
+    )
+
+    $endpoint = '{0}/api/attachment/?model_type=part&model_id={1}&limit=1000' -f `
+        $Session.instanceUrl.TrimEnd('/'), $Session.partId
+    $response = $Client.GetAsync($endpoint).GetAwaiter().GetResult()
+    try {
+        $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) {
+            throw "InvenTree returned HTTP $([int]$response.StatusCode) while reading attachments: $responseBody"
+        }
+
+        $payload = $responseBody | ConvertFrom-Json
+        $attachments = if ($payload.PSObject.Properties.Name -contains 'results') {
+            @($payload.results)
+        }
+        else {
+            @($payload)
+        }
+
+        foreach ($attachment in $attachments) {
+            if ((Get-AttachmentFilename -Attachment $attachment) -ieq $Filename) {
+                $candidateId = $attachment.pk
+                if (-not $candidateId) {
+                    $candidateId = $attachment.id
+                }
+                if ($candidateId) {
+                    return [int]$candidateId
+                }
+            }
+        }
+
+        return $null
+    }
     finally {
-        $request.Dispose()
-        $multipart.Dispose()
-        $fileContent.Dispose()
-        $fileStream.Dispose()
+        $response.Dispose()
+    }
+}
+
+function Send-PartAttachment {
+    param(
+        [object]$Session,
+        [string]$FilePath,
+        [string]$Comment,
+        [object]$PreferredAttachmentId = $null
+    )
+
+    $apiToken = Get-ApiToken
+    $filename = [IO.Path]::GetFileName($FilePath)
+    $client = New-Object System.Net.Http.HttpClient
+    $client.DefaultRequestHeaders.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Token', $apiToken)
+    $attachmentId = $PreferredAttachmentId
+
+    try {
+        if (-not $attachmentId) {
+            $attachmentId = Find-PartAttachmentId -Client $client -Session $Session -Filename $filename
+        }
+
+        $endpoint = if ($attachmentId) {
+            '{0}/api/attachment/{1}/' -f $Session.instanceUrl.TrimEnd('/'), $attachmentId
+        }
+        else {
+            '{0}/api/attachment/' -f $Session.instanceUrl.TrimEnd('/')
+        }
+
+        $multipart = New-Object System.Net.Http.MultipartFormDataContent
+        $fileStream = [IO.File]::Open($FilePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        $fileContent = New-Object System.Net.Http.StreamContent($fileStream)
+        $fileContent.Headers.ContentType = New-Object System.Net.Http.Headers.MediaTypeHeaderValue('application/octet-stream')
+        $multipart.Add($fileContent, 'attachment', $filename)
+
+        if ($attachmentId) {
+            $multipart.Add((New-Object System.Net.Http.StringContent($filename)), 'filename')
+        }
+        else {
+            $multipart.Add((New-Object System.Net.Http.StringContent('part')), 'model_type')
+            $multipart.Add((New-Object System.Net.Http.StringContent([string]$Session.partId)), 'model_id')
+            $multipart.Add((New-Object System.Net.Http.StringContent($Comment)), 'comment')
+        }
+
+        $method = if ($attachmentId) { New-Object System.Net.Http.HttpMethod('PATCH') } else { [System.Net.Http.HttpMethod]::Post }
+        $request = New-Object System.Net.Http.HttpRequestMessage($method, $endpoint)
+        $request.Content = $multipart
+
+        try {
+            $response = $client.SendAsync($request).GetAwaiter().GetResult()
+            try {
+                $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                if (-not $response.IsSuccessStatusCode) {
+                    throw "InvenTree returned HTTP $([int]$response.StatusCode): $responseBody"
+                }
+
+                $result = $responseBody | ConvertFrom-Json
+                if ($attachmentId) {
+                    $uploadedId = [int]$attachmentId
+                }
+                else {
+                    $uploadedId = $result.pk
+                    if (-not $uploadedId) {
+                        $uploadedId = $result.id
+                    }
+                    $uploadedId = [int]$uploadedId
+                }
+                if ($uploadedId -le 0) {
+                    throw "InvenTree did not return an attachment ID: $responseBody"
+                }
+
+                Write-HelperLog "Uploaded $filename to InvenTree Part $($Session.partId) as attachment $uploadedId"
+                return [pscustomobject]@{
+                    Filename = $filename
+                    AttachmentId = $uploadedId
+                }
+            }
+            finally {
+                $response.Dispose()
+            }
+        }
+        finally {
+            $request.Dispose()
+            $multipart.Dispose()
+            $fileContent.Dispose()
+            $fileStream.Dispose()
+        }
+    }
+    finally {
         $client.Dispose()
         $apiToken = $null
     }
 }
 
+function Upload-ProjectToInvenTree {
+    $session = Get-ValidatedSession
+
+    $projectPath = Select-ProjectFile -Session $session
+    if (-not $projectPath) {
+        return
+    }
+
+    if ([IO.Path]::GetExtension($projectPath).ToLowerInvariant() -ne '.3mf' -or
+        [IO.Path]::GetFileName($projectPath).ToLowerInvariant().EndsWith('.gcode.3mf')) {
+        throw 'Only a Bambu Studio .3mf project can be saved to InvenTree.'
+    }
+
+    $uploaded = Send-PartAttachment `
+        -Session $session `
+        -FilePath $projectPath `
+        -Comment 'Saved from Bambu Studio' `
+        -PreferredAttachmentId $session.threeMfAttachmentId
+    $session.threeMfAttachmentId = $uploaded.AttachmentId
+    $session.expectedProjectPath = $projectPath
+    Save-CurrentSession -Session $session
+    return $uploaded.Filename
+}
+
+function Import-GCodeToInvenTree {
+    $session = Get-ValidatedSession
+    $gcodePath = Select-GCodeFile -Session $session
+    if (-not $gcodePath) {
+        return
+    }
+
+    $lowerName = [IO.Path]::GetFileName($gcodePath).ToLowerInvariant()
+    if (-not ($lowerName.EndsWith('.gcode.3mf') -or $lowerName.EndsWith('.gcode'))) {
+        throw 'Only .gcode.3mf and .gcode files can be imported into InvenTree.'
+    }
+
+    $uploaded = Send-PartAttachment `
+        -Session $session `
+        -FilePath $gcodePath `
+        -Comment 'Imported G-code from Bambu Studio'
+
+    if ($session.PSObject.Properties.Name -contains 'lastGCodePath') {
+        $session.lastGCodePath = $gcodePath
+    }
+    else {
+        $session | Add-Member -NotePropertyName lastGCodePath -NotePropertyValue $gcodePath
+    }
+    Save-CurrentSession -Session $session
+    return $uploaded.Filename
+}
+
 if ($UploadNow) {
     try {
         $uploadedFilename = Upload-ProjectToInvenTree
+        if ($uploadedFilename) {
+            Write-Output $uploadedFilename
+        }
+        exit 0
+    }
+    catch {
+        $details = '{0} | {1}' -f $_.Exception.Message, $_.ScriptStackTrace
+        Write-HelperLog ("ERROR: " + $details)
+        Write-Error $details
+        exit 1
+    }
+}
+
+if ($ImportGCodeNow) {
+    try {
+        $uploadedFilename = Import-GCodeToInvenTree
         if ($uploadedFilename) {
             Write-Output $uploadedFilename
         }
@@ -202,6 +378,7 @@ $notifyIcon.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $saveItem = $menu.Items.Add('Save 3MF to InvenTree')
+$gcodeItem = $menu.Items.Add('Import G-code to InvenTree')
 $folderItem = $menu.Items.Add('Open current model folder')
 $logItem = $menu.Items.Add('Open log')
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
@@ -216,6 +393,24 @@ $saveItem.Add_Click({
                 5000,
                 'InvenTree',
                 "$uploadedFilename saved to InvenTree",
+                [System.Windows.Forms.ToolTipIcon]::Info
+            )
+        }
+    }
+    catch {
+        Write-HelperLog ("ERROR: " + $_.Exception.Message)
+        Show-HelperMessage -Message $_.Exception.Message -Icon ([System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
+$gcodeItem.Add_Click({
+    try {
+        $uploadedFilename = Import-GCodeToInvenTree
+        if ($uploadedFilename) {
+            $notifyIcon.ShowBalloonTip(
+                5000,
+                'InvenTree',
+                "$uploadedFilename imported into the active Part",
                 [System.Windows.Forms.ToolTipIcon]::Info
             )
         }

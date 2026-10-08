@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inventree-bambu-open"
-version = "0.4.6"
+version = "0.4.7"
 description = "Connect InvenTree Parts and Build Orders with Bambu Studio and Bambuddy"
 readme = "README.md"
 requires-python = ">=3.11"

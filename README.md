@@ -1,8 +1,9 @@
 # InvenTree Bambu Studio
 
 An InvenTree plugin and Windows helper that opens Part `.3mf`, `.step` and
-`.stp` attachments directly in Bambu Studio, and saves the active Bambu Studio
-project back to the same Part.
+`.stp` attachments directly in Bambu Studio, saves the active Bambu Studio
+project, and imports exported `.gcode.3mf` or `.gcode` files back to the same
+Part.
 
 The repository also contains the production
 [`Bambuddy ↔ InvenTree Sync`](lab8dataprocessor/README.md) sidecar. It mirrors
@@ -59,7 +60,7 @@ docker compose \
 
 Collect the Part action frontend asset, then restart the static web container.
 The Build Order panel module is served directly by the plugin as of version
-`0.4.6`, so panel updates do not depend on a separate static-file collection.
+`0.4.7`, so panel updates do not depend on a separate static-file collection.
 The container names below match the standard names used in the example
 deployment; adjust them if yours differ:
 
@@ -87,7 +88,7 @@ To target another InvenTree image version, set `INVENTREE_VERSION` before the bu
 
 ## Printing a Build Order
 
-1. In Bambu Studio slice the plate, select **Export plate sliced file**, and attach the resulting `.gcode.3mf` to the printable Part. Renaming a normal `.3mf` is not sufficient.
+1. In Bambu Studio slice the plate and select **Export plate sliced file**. Right-click the InvenTree Bambu tray icon, select **Import G-code to InvenTree**, and choose the resulting `.gcode.3mf`. Renaming a normal `.3mf` is not sufficient.
 2. Create a Build Order for that Part and open its **Bambuddy друк** panel.
 3. Check the extracted plate summary. The number of printable objects is inserted as the number of parts per plate; correct it manually if one physical product consists of multiple objects. Optionally select a plate and printer, then select **Передати в Bambuddy**.
 4. Track each run in the same panel. The panel refreshes automatically every five seconds.
@@ -134,6 +135,20 @@ If the expected project file does not exist, the helper asks you to select a
 later saves update that same attachment. The next **3D Друк** click opens the
 `.3mf` project instead of the STEP source.
 
+## Importing G-code to InvenTree
+
+1. Open the Part model using **3D Друк** so the helper knows the active InvenTree Part.
+2. Slice the plate in Bambu Studio.
+3. Export either a sliced plate `.gcode.3mf` or a raw `.gcode` file.
+4. Right-click the InvenTree Bambu tray icon and select **Import G-code to InvenTree**.
+5. Select the exported file.
+
+The helper uploads the file to the active Part's attachments. Importing a file
+with the same name updates the existing attachment instead of creating a
+duplicate. Bambuddy Build Orders require the sliced `.gcode.3mf` format because
+it contains the plate metadata; raw `.gcode` is stored as an attachment but is
+not used for the Build Order queue.
+
 ## File location and names
 
 Models are stored under:
@@ -155,10 +170,11 @@ The helper log is available at:
 
 ## Security
 
-The helper accepts only HTTPS attachment URLs, only `.3mf`, `.step` and `.stp`
-files, only hosts explicitly supplied during installation, and does not follow
-HTTP redirects. The upload token is encrypted using Windows DPAPI. Run the
-installer again to replace the allowed-host list or API token.
+The helper accepts only HTTPS attachment URLs, opens only `.3mf`, `.step` and
+`.stp` files, and uploads only `.3mf`, `.gcode.3mf` and `.gcode` files. It only
+uses hosts explicitly supplied during installation and does not follow HTTP
+redirects. The upload token is encrypted using Windows DPAPI. Run the installer
+again to replace the allowed-host list or API token.
 
 ## Project structure
 

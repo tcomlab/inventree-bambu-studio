@@ -57,7 +57,7 @@ Copy-Item -LiteralPath $sourceTrayScript -Destination $trayScript -Force
     Set-Content -LiteralPath $configPath -Encoding UTF8
 
 if (-not $ApiToken -and -not $SkipTokenPrompt -and -not (Test-Path -LiteralPath $tokenPath)) {
-    $ApiToken = Read-Host 'Enter an InvenTree API token for saving 3MF attachments' -AsSecureString
+    $ApiToken = Read-Host 'Enter an InvenTree API token for saving 3MF and G-code attachments' -AsSecureString
 }
 
 if ($ApiToken -and $ApiToken.Length -gt 0) {
@@ -95,5 +95,5 @@ if (Test-Path -LiteralPath $tokenPath) {
     Write-Host 'API token: configured with Windows DPAPI' -ForegroundColor Green
 }
 else {
-    Write-Warning 'API token is not configured. Opening models works, but saving to InvenTree is disabled.'
+    Write-Warning 'API token is not configured. Opening models works, but saving 3MF and G-code files to InvenTree is disabled.'
 }

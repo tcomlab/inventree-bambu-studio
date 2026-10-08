@@ -68,7 +68,7 @@ class BambuOpenPlugin(
     SLUG = "bambuopen"
     TITLE = "Bambu Studio"
     DESCRIPTION = "Open and save Part 3D models with Bambu Studio"
-    VERSION = "0.4.6"
+    VERSION = "0.4.7"
 
     SETTINGS = {
         "SYNC_SERVICE_URL": {
@@ -228,6 +228,8 @@ class BambuOpenPlugin(
         for item in attachments:
             if item.attachment:
                 filename = PurePosixPath(item.attachment.name).name
+                if filename.lower().endswith(".gcode.3mf"):
+                    continue
                 suffix = PurePosixPath(filename).suffix.lower()
                 if suffix in SUPPORTED_EXTENSIONS:
                     candidates.append((item, filename, suffix))
